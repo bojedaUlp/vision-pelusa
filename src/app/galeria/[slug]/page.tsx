@@ -8,15 +8,24 @@ import { getPriceForCount } from "@/lib/mock-data";
 export default function GalleryPage() {
   const params = useParams<{ slug: string }>();
   const resolvedSlug = typeof params?.slug === "string" ? params.slug : null;
+  type GalleryPhoto = {
+    id: number;
+    number: number;
+    title: string;
+    price: number;
+    imageUrl?: string;
+    watermarkUrl?: string;
+  };
+
   const [selected, setSelected] = useState<number[]>([]);
   const [buyerEmail, setBuyerEmail] = useState("juan.perez@gmail.com");
-  const [photoData, setPhotoData] = useState<Array<{ id: number; number: number; title: string; price: number }>>([]);
+  const [photoData, setPhotoData] = useState<GalleryPhoto[]>([]);
   const [match, setMatch] = useState<{ slug: string; tag?: string; title: string; subtitle: string; venue: string; date: string; photoCount: number } | null>(null);
   const [isPaying, setIsPaying] = useState(false);
   const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null);
 
   const normalizedPhotoData = useMemo(() => {
-    const unique = new Map<string, { id: number; number: number; title: string; price: number }>();
+    const unique = new Map<string, GalleryPhoto>();
 
     photoData.forEach((photo, index) => {
       const rawId = Number(photo.id ?? photo.number ?? index + 1);
@@ -24,6 +33,8 @@ export default function GalleryPage() {
       const id = Number.isFinite(rawId) ? rawId : index + 1;
       const number = Number.isFinite(rawNumber) ? rawNumber : index + 1;
       const price = Number.isFinite(Number(photo.price)) ? Number(photo.price) : 1500;
+      const imageUrl = typeof photo.imageUrl === "string" ? photo.imageUrl : "";
+      const watermarkUrl = typeof photo.watermarkUrl === "string" ? photo.watermarkUrl : imageUrl;
       const key = `${id}-${number}`;
 
       if (!unique.has(key)) {
@@ -32,6 +43,8 @@ export default function GalleryPage() {
           id,
           number,
           price,
+          imageUrl,
+          watermarkUrl,
         });
       }
     });
@@ -202,6 +215,7 @@ export default function GalleryPage() {
               const displayPrice = photoPrice >= 1500 ? "$1.500" : "$900";
               const photoKey = `photo-${photo.id ?? index + 1}-${photo.number ?? index + 1}-${index}`;
               const paletteIndex = ((Number(photo.id) || Number(photo.number) || index + 1) % 6) + 1;
+              const mediaUrl = isSelected ? (photo.imageUrl || "/logo-vision-pelusa.svg") : (photo.watermarkUrl || photo.imageUrl || "/logo-vision-pelusa.svg");
 
               return (
                 <button
@@ -212,21 +226,27 @@ export default function GalleryPage() {
                     isSelected ? "border-[#FFC94A]" : "border-transparent"
                   }`}
                 >
+                  <img
+                    src={mediaUrl}
+                    alt={photo.title || `Foto ${photo.number}`}
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
+
                   <div
                     className="absolute inset-0"
                     style={{
                       background:
                         paletteIndex === 1
-                          ? "linear-gradient(150deg,#1B4332,#0B0F14 75%)"
+                          ? "linear-gradient(150deg,rgba(27,67,50,0.15),rgba(11,15,20,0.75))"
                           : paletteIndex === 2
-                            ? "linear-gradient(150deg,#28603f,#111820 75%)"
+                            ? "linear-gradient(150deg,rgba(40,96,63,0.15),rgba(17,24,32,0.8))"
                             : paletteIndex === 3
-                              ? "linear-gradient(150deg,#173c2c,#0B0F14 75%)"
+                              ? "linear-gradient(150deg,rgba(23,60,44,0.15),rgba(11,15,20,0.75))"
                               : paletteIndex === 4
-                                ? "linear-gradient(150deg,#204a37,#0B0F14 75%)"
+                                ? "linear-gradient(150deg,rgba(32,74,55,0.15),rgba(11,15,20,0.75))"
                                 : paletteIndex === 5
-                                  ? "linear-gradient(150deg,#1B4332,#111820 75%)"
-                                  : "linear-gradient(150deg,#2b5c46,#0B0F14 75%)",
+                                  ? "linear-gradient(150deg,rgba(27,67,50,0.15),rgba(17,24,32,0.8))"
+                                  : "linear-gradient(150deg,rgba(43,92,70,0.15),rgba(11,15,20,0.75))",
                     }}
                   />
 

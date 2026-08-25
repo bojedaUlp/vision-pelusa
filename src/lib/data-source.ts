@@ -35,12 +35,17 @@ const formatPhoto = (photo: any): ProductPhoto => {
   const safeId = Number(photo.id ?? photo.number ?? 1);
   const safeNumber = Number(photo.number ?? photo.id ?? 1);
   const safePrice = Number(photo.price ?? 1500);
+  const imageUrl = String(photo.image_url ?? photo.imageUrl ?? "") || "";
+  const watermarkUrl = String(photo.watermark_url ?? photo.watermarkUrl ?? imageUrl) || imageUrl;
 
   return {
     id: Number.isFinite(safeId) ? safeId : 1,
     title: photo.title ?? `Foto ${safeNumber || 1}`,
     price: Number.isFinite(safePrice) ? safePrice : 1500,
     number: Number.isFinite(safeNumber) ? safeNumber : 1,
+    imageUrl: imageUrl || undefined,
+    watermarkUrl: watermarkUrl || undefined,
+    isPublished: photo.is_published ?? true,
   };
 };
 

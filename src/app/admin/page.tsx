@@ -131,6 +131,11 @@ export default function AdminPage() {
     setLoginError("");
   };
 
+  const parsePriceValue = (value: string) => {
+    const digits = Number(String(value).replace(/[^\d]/g, ""));
+    return Number.isFinite(digits) && digits > 0 ? digits : 1500;
+  };
+
   const handleFiles = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
     setSelectedFiles(files);
@@ -143,40 +148,99 @@ export default function AdminPage() {
     }
 
     setIsUploading(true);
-    setStatusMessage("Subiendo imágenes y creando la vista previa...");
+    setStatusMessage("Subiendo imágenes y registrando la galería...");
 
     const supabase = isSupabaseConfigured() ? getSupabaseClient() : null;
     const nextUploads: UploadItem[] = [];
 
-    for (const file of selectedFiles) {
-      const fileName = `${Date.now()}-${file.name.replace(/\s+/g, "-")}`;
-      const storagePath = form.slug ? `${form.slug}/${fileName}` : `uploads/${fileName}`;
-
+    try {
       if (supabase) {
-        try {
+        const slug = (form.slug ?? "").trim() || `album-${Date.now()}`;
+        const title = (form.title ?? "").trim() || "Nuevo partido";
+        const subtitle = (form.subtitle ?? "").trim() || "Galería nueva";
+        const venue = subtitle.includes("·") ? subtitle.split("·")[0].trim() : "Cancha Norte";
+        const playedAt = new Date().toISOString();
+        const status = form.status === "Publicada" ? "published" : "draft";
+
+        const { data: matchData, error: matchError } = await supabase
+          .from("matches")
+          .upsert(
+            {
+              slug,
+              title,
+              subtitle,
+              venue,
+              played_at: playedAt,
+              status,
+              cover_url: "",
+            },
+            { onConflict: "slug" },
+          )
+          .select()
+          .single();
+
+        if (matchError || !matchData) {
+          throw new Error(matchError?.message ?? "No se pudo crear o actualizar la galería.");
+        }
+
+        for (const [index, file] of selectedFiles.entries()) {
+          const fileName = `${Date.now()}-${index}-${file.name.replace(/\s+/g, "-")}`;
+          const storagePath = `${slug}/${fileName}`;
           const { data, error } = await supabase.storage.from("photos").upload(storagePath, file, { upsert: true });
 
           if (!error && data) {
             const { data: publicData } = supabase.storage.from("photos").getPublicUrl(data.path);
+            const imageUrl = publicData.publicUrl || URL.createObjectURL(file);
+            const watermarkUrl = `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}watermark=vision-pelusa`;
+
+            await supabase.from("photos").insert([
+              {
+                match_id: matchData.id,
+                title: file.name,
+                sort_order: index,
+                price: parsePriceValue(form.price),
+                image_url: imageUrl,
+                watermark_url: watermarkUrl,
+                is_published: true,
+              },
+            ]);
+
             nextUploads.push({
               name: file.name,
-              url: publicData.publicUrl || URL.createObjectURL(file),
+              url: imageUrl,
               uploaded: true,
               note: "Subida a Supabase",
             });
             continue;
           }
-        } catch {
-          // fallback to local preview below
+
+          nextUploads.push({
+            name: file.name,
+            url: URL.createObjectURL(file),
+            uploaded: false,
+            note: "Vista previa local",
+          });
+        }
+      } else {
+        for (const file of selectedFiles) {
+          nextUploads.push({
+            name: file.name,
+            url: URL.createObjectURL(file),
+            uploaded: false,
+            note: "Vista previa local",
+          });
         }
       }
-
-      nextUploads.push({
-        name: file.name,
-        url: URL.createObjectURL(file),
-        uploaded: false,
-        note: "Vista previa local",
-      });
+    } catch (error) {
+      console.error("upload failed", error);
+      for (const file of selectedFiles) {
+        nextUploads.push({
+          name: file.name,
+          url: URL.createObjectURL(file),
+          uploaded: false,
+          note: "Error de subida; vista previa local",
+        });
+      }
     }
 
     setUploads((prev) => [...nextUploads, ...prev]);

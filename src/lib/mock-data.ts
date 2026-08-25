@@ -15,6 +15,9 @@ export type ProductPhoto = {
   title: string;
   price: number;
   number: number;
+  imageUrl?: string;
+  watermarkUrl?: string;
+  isPublished?: boolean;
 };
 
 export type PurchaseRecord = {
