@@ -20,6 +20,14 @@ export default function Home() {
   }, []);
 
   const { navItems, steps, galleryCards, stats, contactRows } = data;
+
+  const navHrefByItem: Record<string, string> = {
+    Inicio: "/",
+    Galerías: "#galerias",
+    "Cómo funciona": "#como-funciona",
+    Contacto: "#contacto",
+  };
+
   return (
     <div className="min-h-screen bg-[#0B0F14] text-[#F4F1E8]">
       <div className="grain" />
@@ -32,7 +40,7 @@ export default function Home() {
 
           <nav className="hidden items-center gap-8 text-sm font-medium text-[#8A9A93] md:flex">
             {navItems.map((item) => (
-              <a key={item} href="#" className="transition-colors hover:text-[#F4F1E8]">
+              <a key={item} href={navHrefByItem[item] ?? "/"} className="transition-colors hover:text-[#F4F1E8]">
                 {item}
               </a>
             ))}
@@ -42,9 +50,9 @@ export default function Home() {
             <a href="/admin" className="inline-flex items-center justify-center rounded-sm border border-white/10 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[#F4F1E8] transition-colors hover:border-[#FFC94A]/60 hover:text-[#FFC94A]">
               Panel admin
             </a>
-            <button className="inline-flex items-center justify-center rounded-sm bg-[#FFC94A] px-5 py-3 text-[13px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14] transition-transform hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(255,201,74,0.25)]">
+            <a href="/compras" className="inline-flex items-center justify-center rounded-sm bg-[#FFC94A] px-5 py-3 text-[13px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14] transition-transform hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(255,201,74,0.25)]">
               Comprar fotos
-            </button>
+            </a>
           </div>
         </div>
       </header>
@@ -75,19 +83,19 @@ export default function Home() {
 
               <div className="mt-10 inline-block p-[6px]">
                 <div className="flex flex-wrap gap-4">
-                  <button className="inline-flex items-center justify-center rounded-sm bg-[#FFC94A] px-6 py-3 text-[13px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14] transition-transform hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(255,201,74,0.25)]">
+                  <a href="/galeria/fecha-14" className="inline-flex items-center justify-center rounded-sm bg-[#FFC94A] px-6 py-3 text-[13px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14] transition-transform hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(255,201,74,0.25)]">
                     Ver últimas galerías
-                  </button>
-                  <button className="inline-flex items-center justify-center rounded-sm border border-white/15 bg-transparent px-6 py-3 text-[13px] font-semibold uppercase tracking-[0.04em] text-[#F4F1E8] transition-colors hover:border-[#F4F1E8]">
+                  </a>
+                  <a href="#como-funciona" className="inline-flex items-center justify-center rounded-sm border border-white/15 bg-transparent px-6 py-3 text-[13px] font-semibold uppercase tracking-[0.04em] text-[#F4F1E8] transition-colors hover:border-[#F4F1E8]">
                     Cómo funciona
-                  </button>
+                  </a>
                 </div>
               </div>
             </div>
           </div>
         </section>
 
-        <section className="py-[110px]">
+        <section id="como-funciona" className="py-[110px]">
           <div className="section-shell">
             <div className="mb-14 max-w-[560px]">
               <div className="mb-4 flex items-center gap-3 mono text-[12px] uppercase tracking-[0.22em] text-[#FFC94A]">
@@ -114,7 +122,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="py-[110px]">
+        <section id="galerias" className="py-[110px]">
           <div className="section-shell">
             <div className="mb-14 max-w-[560px]">
               <div className="mb-4 flex items-center gap-3 mono text-[12px] uppercase tracking-[0.22em] text-[#FFC94A]">
@@ -128,8 +136,9 @@ export default function Home() {
 
             <div className="grid gap-6 md:grid-cols-3">
               {galleryCards.map((card, index) => (
-                <article key={card.title} className="group overflow-hidden border border-white/10 bg-[#111820] transition-colors hover:border-[#FFC94A]/40">
-                  <div className="relative aspect-[4/3] overflow-hidden">
+                <a key={card.title} href={`/galeria/${card.slug}`} className="group block overflow-hidden border border-white/10 bg-[#111820] transition-colors hover:border-[#FFC94A]/40">
+                  <article className="h-full">
+                    <div className="relative aspect-[4/3] overflow-hidden">
                     <div
                       className="absolute inset-0 transition-transform duration-500 group-hover:scale-105"
                       style={{
@@ -157,24 +166,25 @@ export default function Home() {
                     <span className="absolute bottom-3 right-3 h-4 w-4 border-r-2 border-b-2 border-[#FFC94A] opacity-0 transition-opacity group-hover:opacity-100" />
                   </div>
 
-                  <div className="p-5">
-                    <div className="mono mb-2 text-[10.5px] uppercase tracking-[0.12em] text-[#FFC94A]">
-                      {card.tag}
-                    </div>
-                    <h3 className="mb-2 text-[17px] font-semibold text-[#F4F1E8]">{card.title}</h3>
-                    <p className="mb-5 text-[13px] text-[#8A9A93]">{card.subtitle}</p>
-
-                    <div className="flex items-center justify-between border-t border-white/10 pt-4">
-                      <div>
-                        <div className="mono text-[15px] text-[#F4F1E8]">{card.price}</div>
-                        <span className="block text-[11px] text-[#8A9A93]">por paquete</span>
+                    <div className="p-5">
+                      <div className="mono mb-2 text-[10.5px] uppercase tracking-[0.12em] text-[#FFC94A]">
+                        {card.tag}
                       </div>
-                      <span className="flex items-center gap-2 text-[12px] text-[#8A9A93]">
-                        <span>🔒</span> Acceso seguro
-                      </span>
+                      <h3 className="mb-2 text-[17px] font-semibold text-[#F4F1E8]">{card.title}</h3>
+                      <p className="mb-5 text-[13px] text-[#8A9A93]">{card.subtitle}</p>
+
+                      <div className="flex items-center justify-between border-t border-white/10 pt-4">
+                        <div>
+                          <div className="mono text-[15px] text-[#F4F1E8]">{card.price}</div>
+                          <span className="block text-[11px] text-[#8A9A93]">por paquete</span>
+                        </div>
+                        <span className="flex items-center gap-2 text-[12px] text-[#8A9A93]">
+                          <span>🔒</span> Acceso seguro
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                </article>
+                  </article>
+                </a>
               ))}
             </div>
           </div>
