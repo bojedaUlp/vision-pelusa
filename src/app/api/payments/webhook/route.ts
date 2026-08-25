@@ -40,7 +40,12 @@ function extractCount(body: any, fallback = 1) {
 }
 
 async function verifyPaymentWithMercadoPago(paymentId: string | null) {
+  
   const accessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN;
+  console.log("=== MP DEBUG ===");
+  console.log("Payment ID:", paymentId);
+  console.log("MP token exists:", Boolean(accessToken));
+  console.log("MP token length:", accessToken?.length ?? 0);
   if (!paymentId || !accessToken) {
     return null;
   }
