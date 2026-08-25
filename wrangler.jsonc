@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "main": ".open-next/worker.js",
-  "name": "vision-pelusa-app",
+  "name": "vision-pelusa",
   "compatibility_date": "2025-01-01",
   "compatibility_flags": [
     "nodejs_compat",
@@ -14,7 +14,7 @@
   "services": [
     {
       "binding": "WORKER_SELF_REFERENCE",
-      "service": "vision-pelusa-app"
+      "service": "vision-pelusa"
     }
   ],
   "images": {
