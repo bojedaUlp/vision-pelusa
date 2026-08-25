@@ -1,0 +1,295 @@
+import {
+  adminMatches as fallbackAdminMatches,
+  adminStats as fallbackAdminStats,
+  galleryPhotos as fallbackPhotos,
+  homePageData,
+  matches as fallbackMatches,
+  purchases as fallbackPurchases,
+  type MatchSummary,
+  type ProductPhoto,
+  type PurchaseRecord,
+} from "./mock-data";
+import { getSupabaseClient, isSupabaseConfigured } from "./supabase";
+
+const legacySlugMap: Record<string, string> = {
+  "fecha-14": "pelusa-vs-lanus",
+  "fecha-13": "pelusa-vs-aldosivi",
+  "fecha-12": "pelusa-vs-boca",
+};
+
+const resolveMatchSlug = (slug: string) => legacySlugMap[slug] ?? slug;
+
+const formatMatchCard = (match: any) => ({
+  slug: match.slug,
+  tag: match.tag ?? match.slug?.replace(/-/g, " ") ?? "Partido",
+  title: match.title,
+  subtitle: match.subtitle ?? `${match.venue ?? "Cancha"} · ${match.played_at ? new Date(match.played_at).toLocaleDateString("es-AR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }) : "Fecha"}`,
+  price: match.price ?? "$6.000",
+});
+
+const formatPhoto = (photo: any): ProductPhoto => {
+  const safeId = Number(photo.id ?? photo.number ?? 1);
+  const safeNumber = Number(photo.number ?? photo.id ?? 1);
+  const safePrice = Number(photo.price ?? 1500);
+
+  return {
+    id: Number.isFinite(safeId) ? safeId : 1,
+    title: photo.title ?? `Foto ${safeNumber || 1}`,
+    price: Number.isFinite(safePrice) ? safePrice : 1500,
+    number: Number.isFinite(safeNumber) ? safeNumber : 1,
+  };
+};
+
+export async function getHomePageData() {
+  if (!isSupabaseConfigured()) {
+    return homePageData;
+  }
+
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    return homePageData;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("matches")
+      .select("*")
+      .order("played_at", { ascending: false })
+      .limit(3);
+
+    if (error || !data || data.length === 0) {
+      return homePageData;
+    }
+
+    return {
+      ...homePageData,
+      galleryCards: data.map((match) => formatMatchCard(match)),
+    };
+  } catch {
+    return homePageData;
+  }
+}
+
+export async function getMatches(): Promise<MatchSummary[]> {
+  if (!isSupabaseConfigured()) {
+    return fallbackMatches;
+  }
+
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    return fallbackMatches;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("matches")
+      .select("*")
+      .order("played_at", { ascending: false });
+
+    if (error || !data || data.length === 0) {
+      return fallbackMatches;
+    }
+
+    return data.map((match) => ({
+      slug: match.slug,
+      tag: match.tag ?? "Partido",
+      title: match.title,
+      subtitle: match.subtitle ?? `${match.venue ?? "Cancha"} · ${new Date(match.played_at).toLocaleDateString("es-AR", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })}`,
+      price: match.price ?? "$6.000",
+      venue: match.venue ?? "Cancha Norte",
+      date: match.played_at ? new Date(match.played_at).toLocaleDateString("es-AR", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      }) : "Fecha",
+      photoCount: Number(match.photo_count ?? 0),
+      status: match.status === "published" ? "Publicada" : "Borrador",
+    }));
+  } catch {
+    return fallbackMatches;
+  }
+}
+
+export async function getMatchBySlug(slug: string): Promise<MatchSummary | undefined> {
+  const normalizedSlug = resolveMatchSlug(slug);
+
+  if (!isSupabaseConfigured()) {
+    return fallbackMatches.find((match) => match.slug === normalizedSlug) ?? fallbackMatches.find((match) => match.slug === slug) ?? fallbackMatches[0];
+  }
+
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    return fallbackMatches.find((match) => match.slug === normalizedSlug) ?? fallbackMatches.find((match) => match.slug === slug) ?? fallbackMatches[0];
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("matches")
+      .select("*")
+      .eq("slug", normalizedSlug)
+      .maybeSingle();
+
+    if (error || !data) {
+      const fallbackMatch = fallbackMatches.find((match) => match.slug === normalizedSlug) ?? fallbackMatches.find((match) => match.slug === slug) ?? fallbackMatches[0];
+      return fallbackMatch;
+    }
+
+    return {
+      slug: data.slug,
+      tag: data.tag ?? "Partido",
+      title: data.title,
+      subtitle: data.subtitle ?? `${data.venue ?? "Cancha"} · ${new Date(data.played_at).toLocaleDateString("es-AR", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })}`,
+      price: data.price ?? "$6.000",
+      venue: data.venue ?? "Cancha Norte",
+      date: new Date(data.played_at).toLocaleDateString("es-AR", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      }),
+      photoCount: Number(data.photo_count ?? 0),
+      status: data.status === "published" ? "Publicada" : "Borrador",
+    };
+  } catch {
+    return fallbackMatches.find((match) => match.slug === normalizedSlug) ?? fallbackMatches.find((match) => match.slug === slug) ?? fallbackMatches[0];
+  }
+}
+
+export async function getPhotosByMatchSlug(slug: string): Promise<ProductPhoto[]> {
+  const normalizedSlug = resolveMatchSlug(slug);
+
+  if (!isSupabaseConfigured()) {
+    return fallbackPhotos;
+  }
+
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    return fallbackPhotos;
+  }
+
+  try {
+    const { data: matchData, error: matchError } = await supabase
+      .from("matches")
+      .select("id")
+      .eq("slug", normalizedSlug)
+      .maybeSingle();
+
+    if (matchError || !matchData) {
+      return fallbackPhotos;
+    }
+
+    const { data, error } = await supabase
+      .from("photos")
+      .select("*")
+      .eq("match_id", matchData.id)
+      .order("sort_order", { ascending: true });
+
+    if (error || !data || data.length === 0) {
+      return fallbackPhotos;
+    }
+
+    return data.map((photo) => formatPhoto(photo));
+  } catch {
+    return fallbackPhotos;
+  }
+}
+
+export async function getPurchases(): Promise<PurchaseRecord[]> {
+  if (!isSupabaseConfigured()) {
+    return fallbackPurchases;
+  }
+
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    return fallbackPurchases;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("purchases")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error || !data || data.length === 0) {
+      return fallbackPurchases;
+    }
+
+    return data.map((purchase) => ({
+      title: purchase.title ?? "Compra",
+      meta: purchase.meta ?? "Compra registrada",
+      badge: purchase.badge ?? `${purchase.count ?? 1} fotos`,
+      total: Number(purchase.total_amount ?? purchase.total ?? 0),
+      count: Number(purchase.count ?? 1),
+    }));
+  } catch {
+    return fallbackPurchases;
+  }
+}
+
+export async function getAdminData() {
+  if (!isSupabaseConfigured()) {
+    return {
+      stats: fallbackAdminStats,
+      matches: fallbackAdminMatches,
+    };
+  }
+
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    return {
+      stats: fallbackAdminStats,
+      matches: fallbackAdminMatches,
+    };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("matches")
+      .select("*")
+      .order("played_at", { ascending: false });
+
+    if (error || !data || data.length === 0) {
+      return {
+        stats: fallbackAdminStats,
+        matches: fallbackAdminMatches,
+      };
+    }
+
+    return {
+      stats: fallbackAdminStats,
+      matches: data.map((match) => ({
+        title: match.title,
+        subtitle: `${match.venue ?? "Cancha"} · ${new Date(match.played_at).toLocaleDateString("es-AR", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        })}`,
+        photos: Number(match.photo_count ?? 0),
+        status: match.status === "published" ? "Publicada" : "Borrador",
+        vendas: Number(match.sales_count ?? 0),
+      })),
+    };
+  } catch {
+    return {
+      stats: fallbackAdminStats,
+      matches: fallbackAdminMatches,
+    };
+  }
+}

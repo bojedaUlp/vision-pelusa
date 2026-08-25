@@ -1,0 +1,8 @@
+<svg width="160" height="160" viewBox="0 0 160 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="80" cy="80" r="72" stroke="#FFC94A" stroke-width="8"/>
+  <circle cx="80" cy="80" r="60" fill="#0F1417" stroke="#FFC94A" stroke-width="2"/>
+  <path d="M43 60L51 50H83L98 60L89 80L81 95H64L56 79L43 60Z" fill="#0F1417" stroke="#FFC94A" stroke-width="3"/>
+  <path d="M58 58H84L99 75L116 58H127L109 85L118 112H106L92 92L84 112H72L81 89L69 58H58Z" fill="#FFC94A"/>
+  <path d="M56 103C67 90 73 83 82 76C90 69 96 63 103 59H118C117 67 114 75 108 82C102 89 95 96 86 103C78 109 69 115 58 120C66 117 74 110 80 103L56 103Z" fill="#FFC94A" fill-opacity="0.22"/>
+  <text x="80" y="92" text-anchor="middle" font-size="40" font-weight="800" letter-spacing="-3" font-family="Arial, Helvetica, sans-serif" fill="#FFC94A">VP</text>
+</svg>

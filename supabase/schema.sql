@@ -1,0 +1,93 @@
+create extension if not exists pgcrypto;
+
+create table if not exists public.matches (
+  id uuid primary key default gen_random_uuid(),
+  slug text not null unique,
+  title text not null,
+  subtitle text,
+  venue text not null,
+  played_at timestamptz not null,
+  cover_url text,
+  status text not null default 'draft' check (status in ('draft', 'published', 'archived')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.photos (
+  id uuid primary key default gen_random_uuid(),
+  match_id uuid not null references public.matches(id) on delete cascade,
+  title text not null,
+  sort_order integer not null default 0,
+  price integer not null default 1500,
+  image_url text,
+  watermark_url text,
+  is_published boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.price_tiers (
+  id uuid primary key default gen_random_uuid(),
+  max_count integer not null,
+  amount integer not null,
+  sort_order integer not null default 0
+);
+
+create table if not exists public.purchases (
+  id uuid primary key default gen_random_uuid(),
+  buyer_email text not null,
+  buyer_phone text,
+  status text not null default 'pending' check (status in ('pending', 'paid', 'failed', 'expired')),
+  total_amount integer not null default 0,
+  created_at timestamptz not null default now(),
+  paid_at timestamptz
+);
+
+create table if not exists public.purchase_items (
+  id uuid primary key default gen_random_uuid(),
+  purchase_id uuid not null references public.purchases(id) on delete cascade,
+  photo_id uuid references public.photos(id) on delete set null,
+  quantity integer not null default 1,
+  unit_price integer not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.download_access (
+  id uuid primary key default gen_random_uuid(),
+  purchase_id uuid not null references public.purchases(id) on delete cascade,
+  photo_id uuid references public.photos(id) on delete set null,
+  download_url text not null,
+  expires_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+alter table public.matches enable row level security;
+alter table public.photos enable row level security;
+alter table public.price_tiers enable row level security;
+alter table public.purchases enable row level security;
+alter table public.purchase_items enable row level security;
+alter table public.download_access enable row level security;
+
+create policy if not exists "matches_select_public" on public.matches for select using (true);
+create policy if not exists "photos_select_public" on public.photos for select using (true);
+create policy if not exists "price_tiers_select_public" on public.price_tiers for select using (true);
+create policy if not exists "purchases_select_public" on public.purchases for select using (true);
+create policy if not exists "purchase_items_select_public" on public.purchase_items for select using (true);
+create policy if not exists "download_access_select_public" on public.download_access for select using (true);
+
+create index if not exists matches_slug_idx on public.matches(slug);
+create index if not exists photos_match_id_idx on public.photos(match_id);
+create index if not exists purchases_buyer_email_idx on public.purchases(buyer_email);
+create index if not exists purchase_items_purchase_id_idx on public.purchase_items(purchase_id);
+
+create or replace function public.update_updated_at()
+returns trigger as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$ language plpgsql;
+
+create trigger matches_updated_at
+before update on public.matches
+for each row
+execute function public.update_updated_at();
