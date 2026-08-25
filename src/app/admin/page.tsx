@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { clearAdminSession, getCurrentAdminProfile, isAdminSessionActive, setAdminSession } from "@/lib/admin-auth";
 import { getAdminData } from "@/lib/data-source";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 
@@ -18,6 +19,11 @@ export default function AdminPage() {
   const [uploads, setUploads] = useState<UploadItem[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [statusMessage, setStatusMessage] = useState("Listo para subir fotos del próximo partido.");
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
   const [form, setForm] = useState({
     title: "Pelusa vs Lanús",
     subtitle: "Cancha Norte · 16 ago 2026",
@@ -26,12 +32,104 @@ export default function AdminPage() {
     status: "Publicada",
   });
 
+  const loadAdminData = async () => {
+    const data = await getAdminData();
+    setStats(data.stats);
+    setMatches(data.matches);
+  };
+
   useEffect(() => {
-    void getAdminData().then((data) => {
-      setStats(data.stats);
-      setMatches(data.matches);
-    });
+    const verifySession = async () => {
+      setIsCheckingAuth(true);
+
+      if (!isSupabaseConfigured()) {
+        clearAdminSession();
+        setIsAuthenticated(false);
+        setIsCheckingAuth(false);
+        setLoginError("Configurá las variables de Supabase para habilitar la auth real del admin.");
+        return;
+      }
+
+      const supabase = getSupabaseClient();
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+      if (sessionError || !session) {
+        clearAdminSession();
+        setIsAuthenticated(false);
+        setIsCheckingAuth(false);
+        return;
+      }
+
+      const profile = await getCurrentAdminProfile();
+      if (!profile) {
+        await supabase.auth.signOut();
+        clearAdminSession();
+        setIsAuthenticated(false);
+        setIsCheckingAuth(false);
+        setLoginError("La cuenta no tiene permisos de administrador.");
+        return;
+      }
+
+      setAdminSession(profile.userId);
+      setIsAuthenticated(true);
+      setLoginError("");
+      await loadAdminData();
+      setIsCheckingAuth(false);
+    };
+
+    void verifySession();
   }, []);
+
+  const handleAdminLogin = async () => {
+    setLoginError("");
+
+    if (!loginEmail.trim() || !loginPassword.trim()) {
+      setLoginError("Ingresá email y contraseña.");
+      return;
+    }
+
+    if (!isSupabaseConfigured()) {
+      setLoginError("Faltan las variables NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY.");
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: loginEmail.trim().toLowerCase(),
+      password: loginPassword,
+    });
+
+    if (error || !data.user) {
+      setLoginError("Credenciales inválidas o la cuenta no existe.");
+      return;
+    }
+
+    const profile = await getCurrentAdminProfile();
+    if (!profile) {
+      await supabase.auth.signOut();
+      clearAdminSession();
+      setLoginError("Esta cuenta no tiene permisos de administrador.");
+      return;
+    }
+
+    setAdminSession(profile.userId);
+    setIsAuthenticated(true);
+    setLoginEmail("");
+    setLoginPassword("");
+    await loadAdminData();
+  };
+
+  const handleLogout = async () => {
+    if (isSupabaseConfigured()) {
+      await getSupabaseClient().auth.signOut();
+    }
+
+    clearAdminSession();
+    setIsAuthenticated(false);
+    setLoginEmail("");
+    setLoginPassword("");
+    setLoginError("");
+  };
 
   const handleFiles = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
@@ -87,6 +185,79 @@ export default function AdminPage() {
     setIsUploading(false);
   };
 
+  if (isCheckingAuth) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#0B0F14] px-6 py-12 text-[#F4F1E8]">
+        <div className="w-full max-w-[420px] rounded-[8px] border border-white/10 bg-[#111820] p-8 text-center">
+          <p className="text-[14px] uppercase tracking-[0.08em] text-[#FFC94A]">Verificando acceso</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#0B0F14] px-6 py-12 text-[#F4F1E8]">
+        <div className="w-full max-w-[420px] rounded-[8px] border border-white/10 bg-[#111820] p-8">
+          <div className="mb-6 text-center">
+            <div className="mb-3 inline-flex rounded-full border border-[#FFC94A]/60 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.08em] text-[#FFC94A]">
+              Área privada
+            </div>
+            <h1 className="text-[28px] font-semibold text-[#F4F1E8]">Acceso administrador</h1>
+          </div>
+
+          <label className="block text-[12px] uppercase tracking-[0.08em] text-[#8A9A93]">
+            Email
+            <input
+              type="email"
+              value={loginEmail}
+              onChange={(event) => setLoginEmail(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  void handleAdminLogin();
+                }
+              }}
+              className="mt-2 w-full border border-white/10 bg-[#0B0F14] px-3 py-2 text-[14px] text-[#F4F1E8] outline-none focus:border-[#FFC94A]"
+              placeholder="admin@tu-dominio.com"
+            />
+          </label>
+
+          <label className="mt-5 block text-[12px] uppercase tracking-[0.08em] text-[#8A9A93]">
+            Contraseña
+            <input
+              type="password"
+              value={loginPassword}
+              onChange={(event) => setLoginPassword(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  void handleAdminLogin();
+                }
+              }}
+              className="mt-2 w-full border border-white/10 bg-[#0B0F14] px-3 py-2 text-[14px] text-[#F4F1E8] outline-none focus:border-[#FFC94A]"
+              placeholder="Ingresá tu contraseña"
+            />
+          </label>
+
+          {loginError ? (
+            <p className="mt-4 text-[12px] text-[#fca5a5]">{loginError}</p>
+          ) : null}
+
+          <button
+            type="button"
+            onClick={() => void handleAdminLogin()}
+            className="mt-6 w-full bg-[#FFC94A] px-4 py-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-[#0B0F14]"
+          >
+            Entrar
+          </button>
+
+          <p className="mt-4 text-center text-[11px] text-[#8A9A93]">
+            Iniciá sesión con la cuenta de Supabase con perfil de administrador.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#0B0F14] text-[#F4F1E8]">
       <header className="border-b border-white/10 bg-[#0B0F14]/90 backdrop-blur-md">
@@ -100,7 +271,9 @@ export default function AdminPage() {
 
           <div className="flex items-center gap-6 text-[13px] text-[#8A9A93]">
             <a href="/" className="transition-colors hover:text-[#F4F1E8]">Ver sitio público ↗</a>
-            <a href="/admin" className="transition-colors hover:text-[#F4F1E8]">Actualizar</a>
+            <button type="button" onClick={() => void handleLogout()} className="transition-colors hover:text-[#F4F1E8]">
+              Cerrar sesión
+            </button>
           </div>
         </div>
       </header>

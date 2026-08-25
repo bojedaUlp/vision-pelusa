@@ -10,6 +10,16 @@ export type StorePurchase = {
   createdAt: string;
 };
 
+export function hasPaidPurchaseForEmail(email: string): boolean {
+  const normalized = (email ?? "").trim().toLowerCase();
+  if (!normalized) return false;
+
+  return store.some(
+    (purchase) =>
+      purchase.email.toLowerCase() === normalized && purchase.status === "paid",
+  );
+}
+
 const seedPurchases: StorePurchase[] = [
   {
     id: "p-1001",

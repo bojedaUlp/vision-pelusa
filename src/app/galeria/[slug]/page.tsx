@@ -110,7 +110,12 @@ export default function GalleryPage() {
 
       const payload = await response.json();
 
-      if (payload?.checkoutUrl) {
+      if (
+        payload?.checkoutUrl &&
+        typeof payload.checkoutUrl === "string" &&
+        /^https?:\/\//i.test(payload.checkoutUrl) &&
+        !payload.checkoutUrl.includes("pref_id=mock_")
+      ) {
         const redirectUrl = payload.checkoutUrl;
 
         if (payload?.mock && payload?.paymentId) {
@@ -131,7 +136,7 @@ export default function GalleryPage() {
         return;
       }
 
-      setCheckoutMessage(payload?.message ?? "No se pudo abrir el checkout.");
+      setCheckoutMessage(payload?.message ?? "No se pudo abrir el checkout. Verificá la configuración de Mercado Pago.");
     } catch (error) {
       console.error("checkout request failed", error);
       setCheckoutMessage("Hubo un problema al iniciar el pago.");

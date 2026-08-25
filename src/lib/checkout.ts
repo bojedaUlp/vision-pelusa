@@ -24,21 +24,18 @@ export async function buildCheckoutResponse(items: CheckoutItem[], payerEmail?: 
   }));
 
   const total = normalizedItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const accessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN;
+  const accessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN?.trim();
   const sanitizedEmail = (payerEmail ?? "").trim();
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
   const successUrl = sanitizedEmail ? `${appUrl}/compras?email=${encodeURIComponent(sanitizedEmail)}` : `${appUrl}/compras`;
 
   if (!accessToken) {
-    const paymentId = `mock_${Date.now()}`;
     return {
-      ok: true,
-      mock: true,
-      checkoutUrl: `https://sandbox.mercadopago.com.ar/checkout/v1/redirect?pref_id=${paymentId}`,
-      paymentId,
+      ok: false,
+      mock: false,
       total,
       items: normalizedItems,
-      message: "Checkout mock activo: faltan las variables de Mercado Pago.",
+      message: "Mercado Pago no está configurado. Agregá MERCADO_PAGO_ACCESS_TOKEN para habilitar el pago real.",
     };
   }
 
@@ -84,15 +81,12 @@ export async function buildCheckoutResponse(items: CheckoutItem[], payerEmail?: 
     };
   } catch (error) {
     console.error("checkout error", error);
-    const paymentId = `mock_${Date.now()}`;
     return {
-      ok: true,
-      mock: true,
-      checkoutUrl: `https://sandbox.mercadopago.com.ar/checkout/v1/redirect?pref_id=${paymentId}`,
-      paymentId,
+      ok: false,
+      mock: false,
       total,
       items: normalizedItems,
-      message: "Fallback a mock checkout porque Mercado Pago no está configurado.",
+      message: "No se pudo iniciar el pago real. Verificá la configuración de Mercado Pago.",
     };
   }
 }

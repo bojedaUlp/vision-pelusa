@@ -6,7 +6,7 @@ import { getPurchases } from "@/lib/data-source";
 export default function ComprasPage() {
   const [query, setQuery] = useState("");
   const [hasResults, setHasResults] = useState(true);
-  const [purchaseData, setPurchaseData] = useState<Array<{ title: string; meta: string; badge: string; total: number; count: number }>>([]);
+  const [purchaseData, setPurchaseData] = useState<Array<{ title: string; meta: string; badge: string; total: number; count: number; photoId: number }>>([]);
   const [downloadLabel, setDownloadLabel] = useState<string | null>(null);
 
   const fetchPurchasesForEmail = async (email: string) => {
@@ -16,7 +16,10 @@ export default function ComprasPage() {
 
     if (!trimmed) {
       const fallback = await getPurchases();
-      setPurchaseData(fallback);
+      setPurchaseData(fallback.map((purchase, index) => ({
+        ...purchase,
+        photoId: index + 1,
+      })));
       return;
     }
 
@@ -25,12 +28,13 @@ export default function ComprasPage() {
       const payload = await response.json();
 
       if (payload?.purchases) {
-        setPurchaseData(payload.purchases.map((purchase: any) => ({
+        setPurchaseData(payload.purchases.map((purchase: any, index: number) => ({
           title: purchase.title,
           meta: purchase.meta,
           badge: purchase.badge,
           total: Number(purchase.total ?? 0),
           count: Number(purchase.count ?? 0),
+          photoId: index + 1,
         })));
       }
     } catch (error) {
@@ -48,7 +52,12 @@ export default function ComprasPage() {
       return;
     }
 
-    void getPurchases().then((data) => setPurchaseData(data));
+    void getPurchases().then((data) =>
+      setPurchaseData(data.map((purchase, index) => ({
+        ...purchase,
+        photoId: index + 1,
+      }))),
+    );
   }, []);
 
   const handleSearch = async () => {
@@ -56,51 +65,35 @@ export default function ComprasPage() {
     await fetchPurchasesForEmail(trimmed);
   };
 
-  const handleDownload = async (title: string) => {
+  const handleDownload = async (title: string, photoId: number) => {
     setDownloadLabel(`Preparando ${title}...`);
 
     try {
-      const sourceUrl = "https://images.unsplash.com/photo-1517649763962-0c623066013b?auto=format&fit=crop&w=1200&q=80";
-      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const image = new Image();
-        image.crossOrigin = "anonymous";
-        image.onload = () => resolve(image);
-        image.onerror = () => reject(new Error("No se pudo cargar la imagen"));
-        image.src = sourceUrl;
-      });
-
-      const canvas = document.createElement("canvas");
-      const context = canvas.getContext("2d");
-
-      if (!context) {
-        throw new Error("Canvas no disponible");
+      const email = query.trim();
+      if (!email) {
+        setDownloadLabel("Ingresá tu email para validar tu compra.");
+        return;
       }
 
-      const width = img.naturalWidth || img.width;
-      const height = img.naturalHeight || img.height;
-      canvas.width = width;
-      canvas.height = height;
+      const response = await fetch(`/api/download?email=${encodeURIComponent(email)}&photoId=${encodeURIComponent(photoId)}`);
+      const payload = await response.json();
 
-      context.drawImage(img, 0, 0, width, height);
-      context.save();
-      context.translate(width / 2, height / 2);
-      context.rotate((-24 * Math.PI) / 180);
-      context.font = `${Math.max(28, Math.round(width * 0.045))}px "Segoe UI", sans-serif`;
-      context.fillStyle = "rgba(255,255,255,0.38)";
-      context.textAlign = "center";
-      context.fillText("Visión Pelusa", 0, 0);
-      context.restore();
+      if (!response.ok || !payload?.originalUrl) {
+        setDownloadLabel(payload?.message ?? "Todavía no tenés acceso a esta descarga.");
+        return;
+      }
 
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
       const link = document.createElement("a");
-      link.href = dataUrl;
-      link.download = `${title.toLowerCase().replace(/\s+/g, "-")}-watermark.jpg`;
+      link.href = payload.originalUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.download = `${title.toLowerCase().replace(/\s+/g, "-")}-original.jpg`;
       link.click();
 
-      setDownloadLabel("Descarga lista con marca de agua");
+      setDownloadLabel("Descarga autorizada. La imagen original está lista.");
     } catch (error) {
       console.error("download request failed", error);
-      setDownloadLabel("No se pudo generar la descarga final");
+      setDownloadLabel("No se pudo autorizar la descarga.");
     }
   };
 
@@ -198,10 +191,10 @@ export default function ComprasPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => void handleDownload(purchase.title)}
+                      onClick={() => void handleDownload(purchase.title, purchase.photoId)}
                       className="bg-[#FFC94A] px-4 py-2 text-[12.5px] font-semibold uppercase tracking-[0.02em] text-[#0B0F14]"
                     >
-                      Descargar con marca de agua
+                      Descargar original
                     </button>
                   </div>
                 </div>
