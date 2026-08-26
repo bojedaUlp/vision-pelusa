@@ -6,6 +6,7 @@ import {
   homePageData,
   matches as fallbackMatches,
   purchases as fallbackPurchases,
+  type HomePageData,
   type MatchSummary,
   type ProductPhoto,
   type PurchaseRecord,
@@ -66,14 +67,23 @@ const formatMoney = (value: number) => {
 };
 
 export async function getHomePageData() {
+  const fallback = {
+    ...emptyHomePageData,
+    navItems: ["Inicio", "Galerías", "Cómo funciona", "Contacto"],
+    contactRows: [
+      { label: "Email", value: "crecermarketingsl@gmail.com" },
+      { label: "WhatsApp", value: "+54 9 266 4-001686" },
+    ],
+  } satisfies HomePageData;
+
   if (!isSupabaseConfigured()) {
-    return homePageData;
+    return fallback;
   }
 
   const supabase = getSupabaseClient();
 
   if (!supabase) {
-    return homePageData;
+    return fallback;
   }
 
   try {
@@ -82,12 +92,6 @@ export async function getHomePageData() {
       .select("*")
       .order("played_at", { ascending: false })
       .limit(3);
-
-    const fallback = {
-      ...homePageData,
-      galleryCards: homePageData.galleryCards,
-      contactRows: homePageData.contactRows,
-    };
 
     if (error || !data || data.length === 0) {
       return fallback;
@@ -98,7 +102,7 @@ export async function getHomePageData() {
       galleryCards: data.map((match) => formatMatchCard(match)),
     };
   } catch {
-    return homePageData;
+    return fallback;
   }
 }
 

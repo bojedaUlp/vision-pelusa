@@ -2,10 +2,20 @@
 
 import { useEffect, useState } from "react";
 import { getHomePageData } from "@/lib/data-source";
-import { homePageData, type HomePageData } from "@/lib/mock-data";
+import { emptyHomePageData, type HomePageData } from "@/lib/mock-data";
 
 const defaultHomePageData = {
-  ...homePageData,
+  ...emptyHomePageData,
+  stats: [
+    { value: "38", label: "GALERÍAS PUBLICADAS" },
+    { value: "4.216", label: "FOTOS SUBIDAS" },
+    { value: "$612.400", label: "INGRESOS DEL MES" },
+    { value: "212", label: "FOTOS VENDIDAS" },
+  ],
+  contactRows: [
+    { label: "Email", value: "crecermarketingsl@gmail.com" },
+    { label: "WhatsApp", value: "+54 9 266 4-001686" },
+  ],
 } as HomePageData;
 
 export default function Home() {
@@ -233,16 +243,22 @@ export default function Home() {
           </div>
         </section>
 
-        {stats.length > 0 ? (
-          <section className="py-16 sm:py-20 md:py-[110px]">
+        {(stats.length > 0 || true) ? (
+          <section className="pb-8 pt-6 sm:pb-10 sm:pt-8">
             <div className="section-shell">
-              <div className="flex flex-wrap justify-between gap-6 border-y border-white/10 py-8 sm:gap-8 sm:py-12">
-                {stats.map((stat) => (
-                  <div key={stat.label} className="min-w-[140px] flex-1">
-                    <b className="font-display block text-[30px] text-[#FFC94A] sm:text-[38px]">{stat.value}</b>
-                    <span className="text-[10px] uppercase tracking-[0.1em] text-[#8A9A93] sm:text-[12.5px]">{stat.label}</span>
-                  </div>
-                ))}
+              <div className="border-t border-white/15 pt-6 sm:pt-8">
+                <div className="grid gap-8 md:grid-cols-4 md:gap-6">
+                  {(stats.length > 0 ? stats : defaultHomePageData.stats).map((stat) => (
+                    <div key={stat.label} className="min-w-0">
+                      <div className="font-display text-[clamp(42px,5vw,92px)] leading-none tracking-[-0.06em] text-[#FFC94A]">
+                        {stat.value}
+                      </div>
+                      <div className="mt-2 text-[11px] uppercase tracking-[0.02em] text-[#dfe7e2] sm:text-[13px] md:text-[14px]">
+                        {stat.label}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </section>
