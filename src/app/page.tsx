@@ -14,10 +14,38 @@ const defaultHomePageData = {
 
 export default function Home() {
   const [data, setData] = useState<HomePageData>(defaultHomePageData);
+  const [contactStatus, setContactStatus] = useState<string | null>(null);
 
   useEffect(() => {
     void getHomePageData().then(setData);
   }, []);
+
+  const handleContactSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const name = String(formData.get("name") ?? "").trim();
+    const email = String(formData.get("email") ?? "").trim();
+    const reason = String(formData.get("reason") ?? "").trim();
+    const message = String(formData.get("message") ?? "").trim();
+    const recipient = "crecermarketingsl@gmail.com";
+    const subject = encodeURIComponent(reason || "Consulta desde Visión Pelusa");
+    const body = encodeURIComponent(
+      [
+        `Nombre: ${name}`,
+        `Email: ${email}`,
+        `Motivo: ${reason}`,
+        "",
+        "Mensaje:",
+        message,
+      ].join("\n"),
+    );
+
+    window.location.href = `mailto:${recipient}?subject=${subject}&body=${body}`;
+    setContactStatus("Se abrió tu cliente de correo para enviar el mensaje.");
+    form.reset();
+  };
 
   const { navItems, steps, galleryCards, stats, contactRows } = data;
 
@@ -248,21 +276,21 @@ export default function Home() {
               )}
             </div>
 
-            <form className="space-y-5">
+            <form onSubmit={handleContactSubmit} className="space-y-5">
               <div className="grid gap-5 md:grid-cols-2">
                 <div>
                   <label className="mono mb-2 block text-[12px] uppercase tracking-[0.08em] text-[#8A9A93]">Nombre</label>
-                  <input className="field-input" type="text" placeholder="Tu nombre" />
+                  <input name="name" className="field-input" type="text" placeholder="Tu nombre" required />
                 </div>
                 <div>
                   <label className="mono mb-2 block text-[12px] uppercase tracking-[0.08em] text-[#8A9A93]">Email</label>
-                  <input className="field-input" type="email" placeholder="tu@email.com" />
+                  <input name="email" className="field-input" type="email" placeholder="tu@email.com" required />
                 </div>
               </div>
 
               <div>
                 <label className="mono mb-2 block text-[12px] uppercase tracking-[0.08em] text-[#8A9A93]">Motivo</label>
-                <select className="field-input" defaultValue="">
+                <select name="reason" className="field-input" defaultValue="" required>
                   <option value="" disabled>Seleccioná una opción</option>
                   <option>Comprar fotos</option>
                   <option>Solicitar un evento</option>
@@ -272,10 +300,16 @@ export default function Home() {
 
               <div>
                 <label className="mono mb-2 block text-[12px] uppercase tracking-[0.08em] text-[#8A9A93]">Mensaje</label>
-                <textarea className="field-input min-h-[100px] resize-y" placeholder="Contanos qué necesitás..." />
+                <textarea name="message" className="field-input min-h-[100px] resize-y" placeholder="Contanos qué necesitás..." required />
               </div>
 
-              <button className="inline-flex w-full items-center justify-center rounded-sm bg-[#FFC94A] px-6 py-3 text-[13px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14] transition-transform hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(255,201,74,0.25)] sm:w-auto">
+              {contactStatus ? (
+                <div className="rounded-[4px] border border-[#6FCF97]/25 bg-[#6FCF97]/10 px-3 py-2 text-[12px] text-[#8FE3B1]">
+                  {contactStatus}
+                </div>
+              ) : null}
+
+              <button type="submit" className="inline-flex w-full items-center justify-center rounded-sm bg-[#FFC94A] px-6 py-3 text-[13px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14] transition-transform hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(255,201,74,0.25)] sm:w-auto">
                 Enviar consulta
               </button>
             </form>
