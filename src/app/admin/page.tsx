@@ -12,6 +12,8 @@ type UploadItem = {
   note: string;
 };
 
+const MAX_UPLOAD_BATCH = 25;
+
 export default function AdminPage() {
   const [stats, setStats] = useState<Array<{ value: string; label: string }>>([]);
   const [matches, setMatches] = useState<Array<{ title: string; subtitle: string; photos: number; status: string; vendas: number }>>([]);
@@ -138,6 +140,12 @@ export default function AdminPage() {
 
   const handleFiles = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
+    if (files.length > MAX_UPLOAD_BATCH) {
+      setStatusMessage(`Máximo ${MAX_UPLOAD_BATCH} fotos por lote. Se tomaron las primeras ${MAX_UPLOAD_BATCH}.`);
+      setSelectedFiles(files.slice(0, MAX_UPLOAD_BATCH));
+      return;
+    }
+
     setSelectedFiles(files);
   };
 
@@ -147,8 +155,9 @@ export default function AdminPage() {
       return;
     }
 
+    const filesToUpload = selectedFiles.slice(0, MAX_UPLOAD_BATCH);
     setIsUploading(true);
-    setStatusMessage("Subiendo imágenes y registrando la galería...");
+    setStatusMessage(`Subiendo ${filesToUpload.length} imagen${filesToUpload.length > 1 ? "es" : ""} en lotes seguros...`);
 
     const supabase = isSupabaseConfigured() ? getSupabaseClient() : null;
     const nextUploads: UploadItem[] = [];
@@ -183,46 +192,53 @@ export default function AdminPage() {
           throw new Error(matchError?.message ?? "No se pudo crear o actualizar la galería.");
         }
 
-        for (const [index, file] of selectedFiles.entries()) {
-          const fileName = `${Date.now()}-${index}-${file.name.replace(/\s+/g, "-")}`;
-          const storagePath = `${slug}/${fileName}`;
-          const { data, error } = await supabase.storage.from("photos").upload(storagePath, file, { upsert: true });
+        const uploadChunks = [] as typeof filesToUpload[];
+        for (let index = 0; index < filesToUpload.length; index += 10) {
+          uploadChunks.push(filesToUpload.slice(index, index + 10));
+        }
 
-          if (!error && data) {
-            const { data: publicData } = supabase.storage.from("photos").getPublicUrl(data.path);
-            const imageUrl = publicData.publicUrl || URL.createObjectURL(file);
-            const watermarkUrl = `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}watermark=vision-pelusa`;
+        for (const [chunkIndex, chunk] of uploadChunks.entries()) {
+          for (const [index, file] of chunk.entries()) {
+            const fileName = `${Date.now()}-${chunkIndex}-${index}-${file.name.replace(/\s+/g, "-")}`;
+            const storagePath = `${slug}/${fileName}`;
+            const { data, error } = await supabase.storage.from("photos").upload(storagePath, file, { upsert: true });
 
-            await supabase.from("photos").insert([
-              {
-                match_id: matchData.id,
-                title: file.name,
-                sort_order: index,
-                price: parsePriceValue(form.price),
-                image_url: imageUrl,
-                watermark_url: watermarkUrl,
-                is_published: true,
-              },
-            ]);
+            if (!error && data) {
+              const { data: publicData } = supabase.storage.from("photos").getPublicUrl(data.path);
+              const imageUrl = publicData.publicUrl || URL.createObjectURL(file);
+              const watermarkUrl = `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}watermark=vision-pelusa`;
+
+              await supabase.from("photos").insert([
+                {
+                  match_id: matchData.id,
+                  title: file.name,
+                  sort_order: index + chunkIndex * 10,
+                  price: parsePriceValue(form.price),
+                  image_url: imageUrl,
+                  watermark_url: watermarkUrl,
+                  is_published: true,
+                },
+              ]);
+
+              nextUploads.push({
+                name: file.name,
+                url: imageUrl,
+                uploaded: true,
+                note: "Subida a Supabase",
+              });
+              continue;
+            }
 
             nextUploads.push({
               name: file.name,
-              url: imageUrl,
-              uploaded: true,
-              note: "Subida a Supabase",
+              url: URL.createObjectURL(file),
+              uploaded: false,
+              note: "Vista previa local",
             });
-            continue;
           }
-
-          nextUploads.push({
-            name: file.name,
-            url: URL.createObjectURL(file),
-            uploaded: false,
-            note: "Vista previa local",
-          });
         }
       } else {
-        for (const file of selectedFiles) {
+        for (const file of filesToUpload) {
           nextUploads.push({
             name: file.name,
             url: URL.createObjectURL(file),
@@ -233,7 +249,7 @@ export default function AdminPage() {
       }
     } catch (error) {
       console.error("upload failed", error);
-      for (const file of selectedFiles) {
+      for (const file of filesToUpload) {
         nextUploads.push({
           name: file.name,
           url: URL.createObjectURL(file),
@@ -245,7 +261,7 @@ export default function AdminPage() {
 
     setUploads((prev) => [...nextUploads, ...prev]);
     setSelectedFiles([]);
-    setStatusMessage(`Se cargaron ${nextUploads.length} imagen${nextUploads.length > 1 ? "es" : ""}.`);
+    setStatusMessage(`Se cargaron ${nextUploads.length} imagen${nextUploads.length > 1 ? "es" : ""} en lotes seguros.`);
     setIsUploading(false);
   };
 
