@@ -74,6 +74,7 @@ export async function getHomePageData() {
       { label: "Email", value: "crecermarketingsl@gmail.com" },
       { label: "WhatsApp", value: "+54 9 266 4-001686" },
     ],
+    stats: [],
   } satisfies HomePageData;
 
   if (!isSupabaseConfigured()) {

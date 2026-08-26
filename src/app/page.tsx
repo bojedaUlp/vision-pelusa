@@ -6,12 +6,6 @@ import { emptyHomePageData, type HomePageData } from "@/lib/mock-data";
 
 const defaultHomePageData = {
   ...emptyHomePageData,
-  stats: [
-    { value: "38", label: "GALERÍAS PUBLICADAS" },
-    { value: "4.216", label: "FOTOS SUBIDAS" },
-    { value: "$612.400", label: "INGRESOS DEL MES" },
-    { value: "212", label: "FOTOS VENDIDAS" },
-  ],
   contactRows: [
     { label: "Email", value: "crecermarketingsl@gmail.com" },
     { label: "WhatsApp", value: "+54 9 266 4-001686" },
@@ -243,26 +237,6 @@ export default function Home() {
           </div>
         </section>
 
-        {(stats.length > 0 || true) ? (
-          <section className="pb-8 pt-6 sm:pb-10 sm:pt-8">
-            <div className="section-shell">
-              <div className="border-t border-white/15 pt-6 sm:pt-8">
-                <div className="grid gap-8 md:grid-cols-4 md:gap-6">
-                  {(stats.length > 0 ? stats : defaultHomePageData.stats).map((stat) => (
-                    <div key={stat.label} className="min-w-0">
-                      <div className="font-display text-[clamp(42px,5vw,92px)] leading-none tracking-[-0.06em] text-[#FFC94A]">
-                        {stat.value}
-                      </div>
-                      <div className="mt-2 text-[11px] uppercase tracking-[0.02em] text-[#dfe7e2] sm:text-[13px] md:text-[14px]">
-                        {stat.label}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </section>
-        ) : null}
 
         <section id="contacto" className="pb-16 pt-8 sm:pb-[110px]">
           <div className="section-shell max-w-[1200px]">
