@@ -49,6 +49,20 @@ const formatPhoto = (photo: any): ProductPhoto => {
   };
 };
 
+const formatCompactNumber = (value: number) => {
+  if (value >= 1000000) return `${(value / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
+  if (value >= 1000) return `${(value / 1000).toFixed(1).replace(/\.0$/, "")}K`;
+  return String(value);
+};
+
+const formatMoney = (value: number) => {
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    maximumFractionDigits: 0,
+  }).format(value);
+};
+
 export async function getHomePageData() {
   if (!isSupabaseConfigured()) {
     return homePageData;
@@ -265,31 +279,79 @@ export async function getAdminData() {
   }
 
   try {
-    const { data, error } = await supabase
-      .from("matches")
-      .select("*")
-      .order("played_at", { ascending: false });
+    const [matchesResponse, photosResponse, purchasesResponse, purchaseItemsResponse] = await Promise.all([
+      supabase
+        .from("matches")
+        .select("id, slug, title, subtitle, venue, played_at, status")
+        .order("played_at", { ascending: false }),
+      supabase
+        .from("photos")
+        .select("id, match_id")
+        .eq("is_published", true),
+      supabase
+        .from("purchases")
+        .select("id, total_amount")
+        .in("status", ["paid"]),
+      supabase
+        .from("purchase_items")
+        .select("quantity, photo_id"),
+    ]);
 
-    if (error || !data || data.length === 0) {
-      return {
-        stats: fallbackAdminStats,
-        matches: fallbackAdminMatches,
-      };
+    if (matchesResponse.error) {
+      throw matchesResponse.error;
     }
 
+    const matchesData = matchesResponse.data ?? [];
+    const photoRows = photosResponse.data ?? [];
+    const purchaseRows = purchasesResponse.data ?? [];
+    const purchaseItemRows = purchaseItemsResponse.data ?? [];
+
+    const photosByMatch = new Map<string, number>();
+    for (const photo of photoRows) {
+      const matchId = photo.match_id;
+      if (!matchId) continue;
+      photosByMatch.set(matchId, (photosByMatch.get(matchId) ?? 0) + 1);
+    }
+
+    const photoIdToMatchId = new Map<string, string>();
+    for (const photo of photoRows) {
+      if (photo.id && photo.match_id) {
+        photoIdToMatchId.set(String(photo.id), String(photo.match_id));
+      }
+    }
+
+    const salesByMatch = new Map<string, number>();
+    for (const item of purchaseItemRows) {
+      const matchId = photoIdToMatchId.get(String(item.photo_id));
+      if (!matchId) continue;
+      salesByMatch.set(matchId, (salesByMatch.get(matchId) ?? 0) + Number(item.quantity ?? 0));
+    }
+
+    const totalRevenue = purchaseRows.reduce((sum, purchase) => sum + Number(purchase.total_amount ?? 0), 0);
+    const totalSoldPhotos = purchaseItemRows.reduce((sum, item) => sum + Number(item.quantity ?? 0), 0);
+    const publishedMatches = matchesData.filter((match) => match.status === "published").length;
+    const totalPhotos = photoRows.length;
+
+    const matchRows = matchesData.map((match) => ({
+      title: match.title,
+      subtitle: `${match.venue ?? "Cancha"} · ${new Date(match.played_at).toLocaleDateString("es-AR", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })}`,
+      photos: Number(photosByMatch.get(String(match.id)) ?? 0),
+      status: match.status === "published" ? "Publicada" : "Borrador",
+      vendas: Number(salesByMatch.get(String(match.id)) ?? 0),
+    }));
+
     return {
-      stats: fallbackAdminStats,
-      matches: data.map((match) => ({
-        title: match.title,
-        subtitle: `${match.venue ?? "Cancha"} · ${new Date(match.played_at).toLocaleDateString("es-AR", {
-          day: "2-digit",
-          month: "short",
-          year: "numeric",
-        })}`,
-        photos: Number(match.photo_count ?? 0),
-        status: match.status === "published" ? "Publicada" : "Borrador",
-        vendas: Number(match.sales_count ?? 0),
-      })),
+      stats: [
+        { value: String(publishedMatches || matchesData.length || 0), label: "Galerías publicadas" },
+        { value: formatCompactNumber(totalPhotos), label: "Fotos subidas" },
+        { value: formatMoney(totalRevenue), label: "Ingresos del mes" },
+        { value: String(totalSoldPhotos), label: "Fotos vendidas" },
+      ],
+      matches: matchRows,
     };
   } catch {
     return {

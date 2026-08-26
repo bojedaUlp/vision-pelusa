@@ -328,6 +328,7 @@ export default function AdminPage() {
         <div className="section-shell flex items-center justify-between py-4">
           <div className="flex items-center gap-3">
             <img src="/logo-vision-pelusa.svg" alt="Visión Pelusa" className="logo-mark" />
+            <span className="text-[14px] font-semibold tracking-[0.08em] text-[#F4F1E8]">Visión Pelusa</span>
             <span className="rounded-full border border-[#FFC94A]/60 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.08em] text-[#FFC94A]">
               ADMIN
             </span>

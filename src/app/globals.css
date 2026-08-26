@@ -91,9 +91,106 @@ h1, h2, h3, .font-display {
   border-color: var(--floodlight);
 }
 
+@keyframes floatSlow {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-12px); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+
+@keyframes fadeUp {
+  0% {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes drift {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  50% { transform: translate3d(18px, -12px, 0) rotate(4deg); }
+  100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+}
+
+.hero-badge {
+  animation: fadeUp 0.8s ease-out both;
+}
+
+.hero-title {
+  animation: fadeUp 1s ease-out 0.15s both;
+}
+
+.hero-copy {
+  animation: fadeUp 1s ease-out 0.25s both;
+}
+
+.hero-actions {
+  animation: fadeUp 1s ease-out 0.35s both;
+}
+
+.hero-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(24px);
+  opacity: 0.6;
+  pointer-events: none;
+  animation: pulseGlow 7s ease-in-out infinite;
+}
+
+.hero-orb-1 {
+  top: 10%;
+  left: 10%;
+  width: 220px;
+  height: 220px;
+  background: rgba(255, 201, 74, 0.18);
+}
+
+.hero-orb-2 {
+  right: 12%;
+  bottom: 14%;
+  width: 260px;
+  height: 260px;
+  background: rgba(27, 67, 50, 0.4);
+  animation-delay: 0.7s;
+}
+
+.hero-float {
+  animation: floatSlow 8s ease-in-out infinite;
+}
+
+.card-rise {
+  transition: transform 0.35s ease, border-color 0.35s ease, box-shadow 0.35s ease;
+}
+
+.card-rise:hover {
+  transform: translateY(-6px);
+  border-color: rgba(255, 201, 74, 0.45);
+  box-shadow: 0 18px 35px rgba(0, 0, 0, 0.18);
+}
+
+.grid-float {
+  animation: drift 14s ease-in-out infinite;
+}
+
 @media (max-width: 768px) {
   .section-shell {
     padding-left: 20px;
     padding-right: 20px;
+  }
+
+  .hero-orb-1 {
+    width: 150px;
+    height: 150px;
+  }
+
+  .hero-orb-2 {
+    width: 170px;
+    height: 170px;
   }
 }

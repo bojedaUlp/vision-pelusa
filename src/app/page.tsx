@@ -36,6 +36,7 @@ export default function Home() {
         <div className="section-shell flex items-center justify-between py-4">
           <div className="flex items-center gap-3">
             <img src="/logo-vision-pelusa.svg" alt="Visión Pelusa" className="logo-mark" />
+            <span className="text-[14px] font-semibold tracking-[0.08em] text-[#F4F1E8]">Visión Pelusa</span>
           </div>
 
           <nav className="hidden items-center gap-8 text-sm font-medium text-[#8A9A93] md:flex">
@@ -59,6 +60,8 @@ export default function Home() {
 
       <main>
         <section className="hero-glow relative overflow-hidden">
+          <div className="hero-orb hero-orb-1" />
+          <div className="hero-orb hero-orb-2" />
           <div className="absolute inset-y-0 left-[8%] w-px bg-gradient-to-b from-[#FFC94A]/30 via-[#FFC94A]/10 to-transparent blur-sm" style={{ transform: "rotate(12deg)" }} />
           <div className="absolute inset-y-0 left-[22%] w-px bg-gradient-to-b from-[#FFC94A]/20 via-[#FFC94A]/5 to-transparent blur-sm" style={{ transform: "rotate(6deg)" }} />
           <div className="absolute inset-y-0 right-[12%] w-px bg-gradient-to-b from-[#FFC94A]/30 via-[#FFC94A]/10 to-transparent blur-sm" style={{ transform: "rotate(-14deg)" }} />
@@ -66,22 +69,22 @@ export default function Home() {
           <div className="absolute bottom-0 left-0 right-0 h-[38vh] bg-[repeating-linear-gradient(90deg,rgba(255,255,255,0.025)_0_60px,rgba(255,255,255,0.05)_60px_120px)] [mask-image:linear-gradient(180deg,transparent,black_70%)]" />
 
           <div className="section-shell relative z-10 flex min-h-[100vh] items-center py-24">
-            <div className="w-full">
-              <div className="mb-6 flex items-center gap-3 mono text-[12px] uppercase tracking-[0.22em] text-[#FFC94A]">
+            <div className="w-full hero-float">
+              <div className="hero-badge mb-6 flex items-center gap-3 mono text-[12px] uppercase tracking-[0.22em] text-[#FFC94A]">
                 <span className="block h-px w-7 bg-[#FFC94A]" />
                 Fotografía oficial
               </div>
 
-              <h1 className="max-w-[820px] text-[clamp(44px,8vw,92px)] font-semibold leading-[1.05] text-[#F4F1E8]">
+              <h1 className="hero-title max-w-[820px] text-[clamp(44px,8vw,92px)] font-semibold leading-[1.05] text-[#F4F1E8]">
                 La emoción del partido,
                 <span className="block text-[#FFC94A]">en cada cuadro.</span>
               </h1>
 
-              <p className="mt-7 max-w-[480px] text-[17px] text-[#8A9A93]">
+              <p className="hero-copy mt-7 max-w-[480px] text-[17px] text-[#8A9A93]">
                 Galerías de fotos de la Liga Sanluiseña para hinchas, familias y jugadores que quieren volver a vivir cada jugada.
               </p>
 
-              <div className="mt-10 inline-block p-[6px]">
+              <div className="hero-actions mt-10 inline-block p-[6px]">
                 <div className="flex flex-wrap gap-4">
                   <a href="/galeria/fecha-14" className="inline-flex items-center justify-center rounded-sm bg-[#FFC94A] px-6 py-3 text-[13px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14] transition-transform hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(255,201,74,0.25)]">
                     Ver últimas galerías
@@ -134,9 +137,9 @@ export default function Home() {
               </h2>
             </div>
 
-            <div className="grid gap-6 md:grid-cols-3">
+            <div className="grid-float grid gap-6 md:grid-cols-3">
               {galleryCards.map((card, index) => (
-                <a key={card.title} href={`/galeria/${card.slug}`} className="group block overflow-hidden border border-white/10 bg-[#111820] transition-colors hover:border-[#FFC94A]/40">
+                <a key={card.title} href={`/galeria/${card.slug}`} className="card-rise group block overflow-hidden border border-white/10 bg-[#111820]">
                   <article className="h-full">
                     <div className="relative aspect-[4/3] overflow-hidden">
                     <div

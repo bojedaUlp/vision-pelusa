@@ -164,6 +164,7 @@ export default function GalleryPage() {
         <div className="section-shell flex items-center justify-between py-4">
           <a href="/" className="flex items-center gap-3">
             <img src="/logo-vision-pelusa.svg" alt="Visión Pelusa" className="logo-mark" />
+            <span className="text-[14px] font-semibold tracking-[0.08em] text-[#F4F1E8]">Visión Pelusa</span>
           </a>
 
           <a href="/" className="text-[13.5px] text-[#8A9A93] transition-colors hover:text-[#F4F1E8]">
