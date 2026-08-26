@@ -31,7 +31,7 @@ export type PurchaseRecord = {
 export type HomePageData = {
   navItems: string[];
   steps: Array<{ number: string; title: string; text: string }>;
-  galleryCards: Array<{ slug: string; tag: string; title: string; subtitle: string; price: string }>;
+  galleryCards: Array<{ slug: string; tag: string; title: string; subtitle: string; price: string; imageUrl?: string }>;
   stats: Array<{ value: string; label: string }>;
   contactRows: Array<{ label: string; value: string }>;
 };

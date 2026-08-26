@@ -30,6 +30,7 @@ const formatMatchCard = (match: any) => ({
     year: "numeric",
   }) : "Fecha"}`,
   price: match.price ?? "$6.000",
+  imageUrl: match.cover_url ?? match.image_url ?? undefined,
 });
 
 const formatPhoto = (photo: any): ProductPhoto => {

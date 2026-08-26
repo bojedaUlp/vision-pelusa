@@ -179,16 +179,18 @@ export default function Home() {
                     <article className="h-full">
                       <div className="relative aspect-[4/3] overflow-hidden">
                         <div
-                          className="absolute inset-0 transition-transform duration-500 group-hover:scale-105"
+                          className="absolute inset-0 bg-cover bg-center bg-no-repeat transition-transform duration-500 group-hover:scale-105"
                           style={{
-                            background:
+                            backgroundImage: card.imageUrl ? `url(${card.imageUrl})` : undefined,
+                            backgroundColor:
                               index === 0
-                                ? "linear-gradient(135deg,#1B4332,#0B0F14 70%)"
+                                ? "#1B4332"
                                 : index === 1
-                                  ? "linear-gradient(135deg,#2b5c46,#0B0F14 70%)"
-                                  : "linear-gradient(135deg,#173c2c,#111820 70%)",
+                                  ? "#2b5c46"
+                                  : "#173c2c",
                           }}
                         />
+                        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.06),rgba(0,0,0,0.28))]" />
                         <div className="absolute inset-[-20%_-50%] flex flex-wrap content-around rotate-[-18deg] opacity-20">
                           {Array.from({ length: 5 }).map((_, i) => (
                             <span key={i} className="mono w-full text-center text-[11px] uppercase tracking-[0.15em] text-[#F4F1E8]">
@@ -196,7 +198,7 @@ export default function Home() {
                             </span>
                           ))}
                         </div>
-                        <div className="relative z-10 flex h-full items-center justify-center mono text-[12px] uppercase tracking-[0.1em] text-[#8A9A93]">
+                        <div className="relative z-10 flex h-full items-center justify-center mono text-[12px] uppercase tracking-[0.1em] text-white/80">
                           {card.tag}
                         </div>
                         <span className="absolute left-3 top-3 h-4 w-4 border-l-2 border-t-2 border-[#FFC94A] opacity-0 transition-opacity group-hover:opacity-100" />
