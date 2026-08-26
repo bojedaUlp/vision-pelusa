@@ -67,13 +67,13 @@ const formatMoney = (value: number) => {
 
 export async function getHomePageData() {
   if (!isSupabaseConfigured()) {
-    return emptyHomePageData;
+    return homePageData;
   }
 
   const supabase = getSupabaseClient();
 
   if (!supabase) {
-    return emptyHomePageData;
+    return homePageData;
   }
 
   try {
@@ -83,16 +83,22 @@ export async function getHomePageData() {
       .order("played_at", { ascending: false })
       .limit(3);
 
+    const fallback = {
+      ...homePageData,
+      galleryCards: homePageData.galleryCards,
+      contactRows: homePageData.contactRows,
+    };
+
     if (error || !data || data.length === 0) {
-      return emptyHomePageData;
+      return fallback;
     }
 
     return {
-      ...emptyHomePageData,
+      ...fallback,
       galleryCards: data.map((match) => formatMatchCard(match)),
     };
   } catch {
-    return emptyHomePageData;
+    return homePageData;
   }
 }
 

@@ -2,14 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { getHomePageData } from "@/lib/data-source";
-import type { HomePageData } from "@/lib/mock-data";
+import { homePageData, type HomePageData } from "@/lib/mock-data";
 
 const defaultHomePageData = {
-  navItems: ["Inicio", "Galerías", "Cómo funciona", "Contacto"],
-  steps: [],
-  galleryCards: [],
-  stats: [],
-  contactRows: [],
+  ...homePageData,
 } as HomePageData;
 
 export default function Home() {
@@ -253,75 +249,51 @@ export default function Home() {
         ) : null}
 
         <section id="contacto" className="pb-16 pt-8 sm:pb-[110px]">
-          <div className="section-shell grid gap-10 lg:grid-cols-[1fr_1.1fr] lg:gap-16">
-            <div>
-              <div className="mb-4 flex items-center gap-3 mono text-[10px] uppercase tracking-[0.22em] text-[#FFC94A] sm:text-[12px]">
-                <span className="block h-px w-6 bg-[#FFC94A] sm:w-7" />
-                Contacto
+          <div className="section-shell max-w-[1200px]">
+            <div className="mx-auto max-w-[1100px]">
+              <div className="mb-4 flex items-center gap-3 mono text-[10px] uppercase tracking-[0.18em] text-[#FFC94A] sm:text-[12px]">
+                <span className="block h-px w-8 bg-[#FFC94A] sm:w-10" />
+                CONTACTO
               </div>
-              <h2 className="mb-5 text-[clamp(26px,5vw,40px)] text-[#F4F1E8]">Hablemos del próximo partido.</h2>
-              <p className="mb-7 text-[14px] text-[#8A9A93] sm:text-[15px]">
+
+              <h2 className="max-w-[820px] text-[clamp(38px,6vw,96px)] leading-[0.96] tracking-[-0.04em] text-[#F4F1E8]">
+                HABLAMOS DEL PRÓXIMO
+                <span className="block">PARTIDO.</span>
+              </h2>
+
+              <p className="mt-6 max-w-[760px] text-[clamp(16px,2vw,28px)] leading-[1.3] text-[#b9c2bd]">
                 Si querés una sesión especial, un paquete institucional o un evento puntual, escribinos y te respondemos rápido.
               </p>
 
-              {contactRows.length > 0 ? (
-                contactRows.map((row) => (
-                  <div key={row.label} className="flex items-center gap-3 border-t border-white/10 py-4 text-[13px] text-[#F4F1E8] sm:gap-4 sm:text-[14.5px]">
-                    <b className="mono w-[96px] flex-shrink-0 text-[10px] uppercase tracking-[0.1em] text-[#FFC94A] sm:w-[120px] sm:text-[11px]">{row.label}</b>
-                    <a
-                      href={row.label === "Email" ? `mailto:${row.value}` : row.label === "WhatsApp" ? `https://wa.me/5492664001686` : undefined}
-                      target={row.label === "WhatsApp" ? "_blank" : undefined}
-                      rel={row.label === "WhatsApp" ? "noopener noreferrer" : undefined}
-                      className={row.label === "Email" || row.label === "WhatsApp" ? "text-[#F4F1E8] transition-colors hover:text-[#FFC94A]" : "text-[#8A9A93]"}
-                    >
-                      {row.value}
-                    </a>
+              <div className="mt-8 rounded-[4px] border border-white/15 bg-[#0F1720]/60 p-5 sm:p-7">
+                {contactRows.length > 0 ? (
+                  <div className="space-y-3 text-[17px] text-[#F4F1E8] sm:text-[18px]">
+                    {contactRows.map((row) => (
+                      <div key={row.label} className="flex flex-col gap-1 border-b border-white/10 pb-3 last:border-b-0 last:pb-0 sm:flex-row sm:items-center sm:gap-4">
+                        <span className="mono text-[10px] uppercase tracking-[0.18em] text-[#FFC94A] sm:min-w-[130px] sm:text-[12px]">
+                          {row.label}
+                        </span>
+                        {row.label === "Email" ? (
+                          <a href={`mailto:${row.value}`} className="text-[#F4F1E8] transition-colors hover:text-[#FFC94A]">
+                            {row.value}
+                          </a>
+                        ) : row.label === "WhatsApp" ? (
+                          <a href="https://wa.me/5492664001686" target="_blank" rel="noreferrer" className="text-[#F4F1E8] transition-colors hover:text-[#FFC94A]">
+                            {row.value}
+                          </a>
+                        ) : (
+                          <span className="text-[#dfe8e2]">{row.value}</span>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                ))
-              ) : (
-                <div className="rounded-[4px] border border-dashed border-white/15 bg-[#111820]/60 p-6 text-[14px] text-[#8A9A93]">
-                  Contacto pendiente de cargar.
-                </div>
-              )}
+                ) : (
+                  <div className="rounded-[4px] border border-dashed border-white/15 bg-[#111820]/60 p-6 text-[18px] text-[#8A9A93]">
+                    Contacto pendiente de cargar.
+                  </div>
+                )}
+              </div>
             </div>
-
-            <form onSubmit={handleContactSubmit} className="space-y-5">
-              <div className="grid gap-5 md:grid-cols-2">
-                <div>
-                  <label className="mono mb-2 block text-[12px] uppercase tracking-[0.08em] text-[#8A9A93]">Nombre</label>
-                  <input name="name" className="field-input" type="text" placeholder="Tu nombre" required />
-                </div>
-                <div>
-                  <label className="mono mb-2 block text-[12px] uppercase tracking-[0.08em] text-[#8A9A93]">Email</label>
-                  <input name="email" className="field-input" type="email" placeholder="tu@email.com" required />
-                </div>
-              </div>
-
-              <div>
-                <label className="mono mb-2 block text-[12px] uppercase tracking-[0.08em] text-[#8A9A93]">Motivo</label>
-                <select name="reason" className="field-input" defaultValue="" required>
-                  <option value="" disabled>Seleccioná una opción</option>
-                  <option>Comprar fotos</option>
-                  <option>Solicitar un evento</option>
-                  <option>Quiero ser colaborador</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="mono mb-2 block text-[12px] uppercase tracking-[0.08em] text-[#8A9A93]">Mensaje</label>
-                <textarea name="message" className="field-input min-h-[100px] resize-y" placeholder="Contanos qué necesitás..." required />
-              </div>
-
-              {contactStatus ? (
-                <div className="rounded-[4px] border border-[#6FCF97]/25 bg-[#6FCF97]/10 px-3 py-2 text-[12px] text-[#8FE3B1]">
-                  {contactStatus}
-                </div>
-              ) : null}
-
-              <button type="submit" className="inline-flex w-full items-center justify-center rounded-sm bg-[#FFC94A] px-6 py-3 text-[13px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14] transition-transform hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(255,201,74,0.25)] sm:w-auto">
-                Enviar consulta
-              </button>
-            </form>
           </div>
         </section>
       </main>
