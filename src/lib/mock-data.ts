@@ -93,8 +93,8 @@ export const homePageData: HomePageData = {
     { value: "212", label: "Fotos vendidas" },
   ],
   contactRows: [
-    { label: "Email", value: "hola@visionpelusa.com" },
-    { label: "WhatsApp", value: "+54 266 456-7788" },
+    { label: "Email", value: "crecermarketingsl@gmail.com" },
+    { label: "WhatsApp", value: "+54 9 266 4-001686" },
     { label: "Cancha", value: "San Luis, provincia de San Luis" },
   ],
 };

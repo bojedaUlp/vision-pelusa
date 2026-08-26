@@ -266,7 +266,14 @@ export default function Home() {
                 contactRows.map((row) => (
                   <div key={row.label} className="flex items-center gap-3 border-t border-white/10 py-4 text-[13px] text-[#F4F1E8] sm:gap-4 sm:text-[14.5px]">
                     <b className="mono w-[96px] flex-shrink-0 text-[10px] uppercase tracking-[0.1em] text-[#FFC94A] sm:w-[120px] sm:text-[11px]">{row.label}</b>
-                    <span className="text-[#8A9A93] break-all">{row.value}</span>
+                    <a
+                      href={row.label === "Email" ? `mailto:${row.value}` : row.label === "WhatsApp" ? `https://wa.me/5492664001686` : undefined}
+                      target={row.label === "WhatsApp" ? "_blank" : undefined}
+                      rel={row.label === "WhatsApp" ? "noopener noreferrer" : undefined}
+                      className={row.label === "Email" || row.label === "WhatsApp" ? "text-[#F4F1E8] transition-colors hover:text-[#FFC94A]" : "text-[#8A9A93]"}
+                    >
+                      {row.value}
+                    </a>
                   </div>
                 ))
               ) : (
