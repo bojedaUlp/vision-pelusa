@@ -100,37 +100,46 @@ export async function POST(request: Request) {
     if (isSupabaseConfigured()) {
       const supabase = getSupabaseClient();
       if (supabase) {
-        const { data: purchaseData, error: purchaseError } = await supabase
+        const { data: existingPurchases, error: existingError } = await supabase
           .from("purchases")
-          .insert([
-            {
-              buyer_email: email,
-              status: "paid",
-              total_amount: total,
-              paid_at: new Date().toISOString(),
-            },
-          ])
-          .select()
-          .single();
+          .select("id")
+          .ilike("buyer_email", `%${email}%`)
+          .eq("status", "paid")
+          .limit(1);
 
-        if (!purchaseError && purchaseData) {
-          await supabase.from("purchase_items").insert([
-            {
-              purchase_id: purchaseData.id,
-              quantity: count,
-              unit_price: total,
-              photo_id: null,
-            },
-          ]);
+        if (!existingError && Array.isArray(existingPurchases) && existingPurchases.length === 0) {
+          const { data: purchaseData, error: purchaseError } = await supabase
+            .from("purchases")
+            .insert([
+              {
+                buyer_email: email,
+                status: "paid",
+                total_amount: total,
+                paid_at: new Date().toISOString(),
+              },
+            ])
+            .select()
+            .single();
 
-          await supabase.from("download_access").insert([
-            {
-              purchase_id: purchaseData.id,
-              photo_id: null,
-              download_url: `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/compras?email=${encodeURIComponent(email)}`,
-              expires_at: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString(),
-            },
-          ]);
+          if (!purchaseError && purchaseData) {
+            await supabase.from("purchase_items").insert([
+              {
+                purchase_id: purchaseData.id,
+                quantity: count,
+                unit_price: total,
+                photo_id: null,
+              },
+            ]);
+
+            await supabase.from("download_access").insert([
+              {
+                purchase_id: purchaseData.id,
+                photo_id: null,
+                download_url: `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://visionpelusa.com").replace(/\/+$/, "")}/compras?email=${encodeURIComponent(email)}`,
+                expires_at: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString(),
+              },
+            ]);
+          }
         }
       }
     }

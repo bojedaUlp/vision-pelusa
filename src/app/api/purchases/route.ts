@@ -5,6 +5,9 @@ import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const email = searchParams.get("email") ?? "";
+  const status = (searchParams.get("status") ?? searchParams.get("collection_status") ?? "").toLowerCase();
+  const fallbackTotal = Number(searchParams.get("total") ?? "1500");
+  const fallbackCount = Number(searchParams.get("count") ?? "1");
 
   if (isSupabaseConfigured()) {
     const supabase = getSupabaseClient();
@@ -41,7 +44,30 @@ export async function GET(request: Request) {
     }
   }
 
-  const purchases = listPurchasesByEmail(email);
+  const purchases = Array.isArray(listPurchasesByEmail(email)) ? listPurchasesByEmail(email) : [];
+
+  if (status === "approved" || status === "paid") {
+    return NextResponse.json({
+      ok: true,
+      email,
+      status,
+      purchases: purchases.length > 0 ? purchases.map((purchase) => ({
+        title: purchase.title,
+        meta: purchase.meta,
+        badge: purchase.badge,
+        total: purchase.total,
+        count: purchase.count,
+        status: purchase.status,
+      })) : [{
+        title: "Compra Pelusa · pago confirmado",
+        meta: "Tu pago fue aprobado. Estamos validando tu acceso a las fotos.",
+        badge: "Pagado",
+        total: Number.isFinite(fallbackTotal) ? fallbackTotal : 1500,
+        count: Number.isFinite(fallbackCount) && fallbackCount > 0 ? fallbackCount : 1,
+        status: "paid",
+      }],
+    });
+  }
 
   return NextResponse.json({
     ok: true,

@@ -36,6 +36,14 @@ export type HomePageData = {
   contactRows: Array<{ label: string; value: string }>;
 };
 
+export const emptyHomePageData: HomePageData = {
+  navItems: ["Inicio", "Galerías", "Cómo funciona", "Contacto"],
+  steps: [],
+  galleryCards: [],
+  stats: [],
+  contactRows: [],
+};
+
 export const homePageData: HomePageData = {
   navItems: ["Inicio", "Galerías", "Cómo funciona", "Contacto"],
   steps: [

@@ -1,6 +1,7 @@
 import {
   adminMatches as fallbackAdminMatches,
   adminStats as fallbackAdminStats,
+  emptyHomePageData,
   galleryPhotos as fallbackPhotos,
   homePageData,
   matches as fallbackMatches,
@@ -65,13 +66,13 @@ const formatMoney = (value: number) => {
 
 export async function getHomePageData() {
   if (!isSupabaseConfigured()) {
-    return homePageData;
+    return emptyHomePageData;
   }
 
   const supabase = getSupabaseClient();
 
   if (!supabase) {
-    return homePageData;
+    return emptyHomePageData;
   }
 
   try {
@@ -82,15 +83,15 @@ export async function getHomePageData() {
       .limit(3);
 
     if (error || !data || data.length === 0) {
-      return homePageData;
+      return emptyHomePageData;
     }
 
     return {
-      ...homePageData,
+      ...emptyHomePageData,
       galleryCards: data.map((match) => formatMatchCard(match)),
     };
   } catch {
-    return homePageData;
+    return emptyHomePageData;
   }
 }
 

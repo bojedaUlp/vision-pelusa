@@ -26,8 +26,10 @@ export async function buildCheckoutResponse(items: CheckoutItem[], payerEmail?: 
   const total = normalizedItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const accessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN?.trim();
   const sanitizedEmail = (payerEmail ?? "").trim();
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-  const successUrl = sanitizedEmail ? `${appUrl}/compras?email=${encodeURIComponent(sanitizedEmail)}` : `${appUrl}/compras`;
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://visionpelusa.com").replace(/\/+$/, "");
+  const successUrl = sanitizedEmail
+    ? `${appUrl}/compras?email=${encodeURIComponent(sanitizedEmail)}&status=approved&source=mercadopago`
+    : `${appUrl}/compras?status=approved&source=mercadopago`;
 
   if (!accessToken) {
     return {

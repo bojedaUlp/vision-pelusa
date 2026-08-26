@@ -8,6 +8,7 @@ export default function ComprasPage() {
   const [hasResults, setHasResults] = useState(true);
   const [purchaseData, setPurchaseData] = useState<Array<{ title: string; meta: string; badge: string; total: number; count: number; photoId: number }>>([]);
   const [downloadLabel, setDownloadLabel] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const fetchPurchasesForEmail = async (email: string) => {
     const trimmed = email.trim();
@@ -26,29 +27,54 @@ export default function ComprasPage() {
     try {
       const response = await fetch(`/api/purchases?email=${encodeURIComponent(trimmed)}`);
       const payload = await response.json();
+      const purchases = Array.isArray(payload?.purchases) ? payload.purchases : [];
+      const mappedPurchases = purchases.map((purchase: any, index: number) => ({
+        title: purchase.title,
+        meta: purchase.meta,
+        badge: purchase.badge,
+        total: Number(purchase.total ?? 0),
+        count: Number(purchase.count ?? 0),
+        photoId: index + 1,
+      }));
 
-      if (payload?.purchases) {
-        setPurchaseData(payload.purchases.map((purchase: any, index: number) => ({
-          title: purchase.title,
-          meta: purchase.meta,
-          badge: purchase.badge,
-          total: Number(purchase.total ?? 0),
-          count: Number(purchase.count ?? 0),
-          photoId: index + 1,
-        })));
-      }
+      setHasResults(mappedPurchases.length > 0 || (payload?.status === "approved" || payload?.status === "paid"));
+      setPurchaseData(mappedPurchases);
     } catch (error) {
       console.error("purchase lookup failed", error);
+      setHasResults(false);
+      setPurchaseData([]);
     }
   };
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
     const emailFromUrl = searchParams.get("email") ?? "";
+    const statusFromUrl = searchParams.get("status") ?? searchParams.get("collection_status") ?? "";
+    const paymentId = searchParams.get("payment_id") ?? searchParams.get("collection_id") ?? "";
+
+    if (statusFromUrl === "approved" || statusFromUrl === "paid") {
+      setStatusMessage("Pago confirmado. Validando tu compra...");
+    }
 
     if (emailFromUrl) {
       setQuery(emailFromUrl);
-      void fetchPurchasesForEmail(emailFromUrl);
+      void fetchPurchasesForEmail(emailFromUrl).finally(() => {
+        if ((statusFromUrl === "approved" || statusFromUrl === "paid") && paymentId) {
+          void fetch(`/api/payments/webhook`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              status: "approved",
+              payment_id: paymentId,
+              email: emailFromUrl,
+              buyer_email: emailFromUrl,
+              title: "Compra Pelusa",
+              total: 1500,
+              count: 1,
+            }),
+          }).catch(() => undefined);
+        }
+      });
       return;
     }
 
@@ -141,6 +167,12 @@ export default function ComprasPage() {
         {downloadLabel ? (
           <div className="mx-auto mt-4 max-w-[520px] rounded-[4px] border border-[#FFC94A]/20 bg-[#FFC94A]/10 px-4 py-3 text-center text-[12px] text-[#F6D36F]">
             {downloadLabel}
+          </div>
+        ) : null}
+
+        {statusMessage ? (
+          <div className="mx-auto mt-4 max-w-[520px] rounded-[4px] border border-[#6FCF97]/20 bg-[#6FCF97]/10 px-4 py-3 text-center text-[12px] text-[#6FCF97]">
+            {statusMessage}
           </div>
         ) : null}
 
