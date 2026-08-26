@@ -24,6 +24,8 @@ export default function GalleryPage() {
   const [isPaying, setIsPaying] = useState(false);
   const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null);
 
+  const visiblePhotoCount = Math.max(photoData.length, match?.photoCount ?? 0);
+
   const normalizedPhotoData = useMemo(() => {
     const unique = new Map<string, GalleryPhoto>();
 
@@ -187,7 +189,7 @@ export default function GalleryPage() {
               <div className="mt-4 flex flex-wrap gap-5 text-[13.5px] text-[#8A9A93]">
                 <span>📅 <b className="font-medium text-[#FFC94A]">{match?.date ?? "Fecha"}</b></span>
                 <span>📍 <b className="font-medium text-[#FFC94A]">{match?.venue ?? "Cancha"}</b></span>
-                <span>🖼️ <b className="font-medium text-[#FFC94A]">{match?.photoCount ?? photoData.length} fotos</b></span>
+                <span>🖼️ <b className="font-medium text-[#FFC94A]">{visiblePhotoCount} fotos</b></span>
               </div>
             </div>
           </div>

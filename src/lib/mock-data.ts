@@ -108,7 +108,7 @@ export const matches: MatchSummary[] = [
     price: "$6.000",
     venue: "Cancha Norte",
     date: "16 ago 2026",
-    photoCount: 86,
+    photoCount: 12,
     status: "Publicada",
   },
   {
@@ -119,7 +119,7 @@ export const matches: MatchSummary[] = [
     price: "$9.500",
     venue: "Cancha Norte",
     date: "9 ago 2026",
-    photoCount: 72,
+    photoCount: 12,
     status: "Borrador",
   },
   {
@@ -130,7 +130,7 @@ export const matches: MatchSummary[] = [
     price: "$8.200",
     venue: "Estadio Provincial",
     date: "2 ago 2026",
-    photoCount: 60,
+    photoCount: 12,
     status: "Publicada",
   },
 ];
