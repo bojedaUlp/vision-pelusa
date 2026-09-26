@@ -176,6 +176,7 @@ export const adminStats = [
 
 export const adminMatches = [
   {
+    slug: "fecha-14",
     title: "Deportivo San Luis vs. Atlético Juana Koslay",
     subtitle: "Fecha 14 · Cancha Norte · 16 ago 2026",
     photos: 86,
@@ -183,6 +184,7 @@ export const adminMatches = [
     vendas: 42,
   },
   {
+    slug: "fecha-13",
     title: "Juventud Unida vs. Talleres SL",
     subtitle: "Fecha 13 · Cancha Norte · 9 ago 2026",
     photos: 72,

@@ -12,11 +12,11 @@ type UploadItem = {
   note: string;
 };
 
-const MAX_UPLOAD_BATCH = 25;
+const MAX_UPLOAD_BATCH = 100;
 
 export default function AdminPage() {
   const [stats, setStats] = useState<Array<{ value: string; label: string }>>([]);
-  const [matches, setMatches] = useState<Array<{ title: string; subtitle: string; photos: number; status: string; vendas: number }>>([]);
+  const [matches, setMatches] = useState<Array<{ slug: string; title: string; subtitle: string; photos: number; status: string; vendas: number }>>([]);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploads, setUploads] = useState<UploadItem[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -157,10 +157,12 @@ export default function AdminPage() {
 
     const filesToUpload = selectedFiles.slice(0, MAX_UPLOAD_BATCH);
     setIsUploading(true);
-    setStatusMessage(`Subiendo ${filesToUpload.length} imagen${filesToUpload.length > 1 ? "es" : ""} en lotes seguros...`);
+    setStatusMessage(`Subiendo ${filesToUpload.length} imagen${filesToUpload.length > 1 ? "es" : ""}...`);
 
     const supabase = isSupabaseConfigured() ? getSupabaseClient() : null;
     const nextUploads: UploadItem[] = [];
+    const failedFiles: string[] = [];
+    let successfulCount = 0;
 
     try {
       if (supabase) {
@@ -192,76 +194,88 @@ export default function AdminPage() {
           throw new Error(matchError?.message ?? "No se pudo crear o actualizar la galería.");
         }
 
-        const uploadChunks = [] as typeof filesToUpload[];
-        for (let index = 0; index < filesToUpload.length; index += 10) {
-          uploadChunks.push(filesToUpload.slice(index, index + 10));
-        }
+        for (const [index, file] of filesToUpload.entries()) {
+          const fileName = `${Date.now()}-${index}-${file.name.replace(/\s+/g, "-")}`;
+          const storagePath = `${slug}/${fileName}`;
 
-        for (const [chunkIndex, chunk] of uploadChunks.entries()) {
-          for (const [index, file] of chunk.entries()) {
-            const fileName = `${Date.now()}-${chunkIndex}-${index}-${file.name.replace(/\s+/g, "-")}`;
-            const storagePath = `${slug}/${fileName}`;
+          try {
             const { data, error } = await supabase.storage.from("photos").upload(storagePath, file, { upsert: true });
 
-            if (!error && data) {
-              const { data: publicData } = supabase.storage.from("photos").getPublicUrl(data.path);
-              const imageUrl = publicData.publicUrl || URL.createObjectURL(file);
-              const watermarkUrl = `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}watermark=vision-pelusa`;
+            if (error || !data) {
+              throw new Error(error?.message ?? "No se pudo subir el archivo al storage.");
+            }
 
-              await supabase.from("photos").insert([
-                {
-                  match_id: matchData.id,
-                  title: file.name,
-                  sort_order: index + chunkIndex * 10,
-                  price: parsePriceValue(form.price),
-                  image_url: imageUrl,
-                  watermark_url: watermarkUrl,
-                  is_published: true,
-                },
-              ]);
+            const { data: publicData } = supabase.storage.from("photos").getPublicUrl(data.path);
+            const imageUrl = publicData.publicUrl || URL.createObjectURL(file);
+            const watermarkUrl = `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}watermark=vision-pelusa`;
 
-              nextUploads.push({
-                name: file.name,
-                url: imageUrl,
-                uploaded: true,
-                note: "Subida a Supabase",
-              });
-              continue;
+            const { error: insertError } = await supabase.from("photos").insert([
+              {
+                match_id: matchData.id,
+                title: file.name,
+                sort_order: index,
+                price: parsePriceValue(form.price),
+                image_url: imageUrl,
+                watermark_url: watermarkUrl,
+                is_published: true,
+              },
+            ]);
+
+            if (insertError) {
+              await supabase.storage.from("photos").remove([data.path]).catch(() => undefined);
+              throw new Error(insertError.message ?? "No se pudo registrar la foto en la base de datos.");
             }
 
             nextUploads.push({
               name: file.name,
+              url: imageUrl,
+              uploaded: true,
+              note: "Subida a Supabase",
+            });
+            successfulCount += 1;
+          } catch (error) {
+            const fileError = error instanceof Error ? error.message : "Error desconocido";
+            failedFiles.push(`${file.name} (${fileError})`);
+            nextUploads.push({
+              name: file.name,
               url: URL.createObjectURL(file),
               uploaded: false,
-              note: "Vista previa local",
+              note: fileError,
             });
           }
         }
       } else {
         for (const file of filesToUpload) {
+          failedFiles.push(file.name);
           nextUploads.push({
             name: file.name,
             url: URL.createObjectURL(file),
             uploaded: false,
-            note: "Vista previa local",
+            note: "Supabase no configurado",
           });
         }
       }
     } catch (error) {
+      const fatalMessage = error instanceof Error ? error.message : "Error desconocido";
       console.error("upload failed", error);
       for (const file of filesToUpload) {
+        failedFiles.push(`${file.name} (${fatalMessage})`);
         nextUploads.push({
           name: file.name,
           url: URL.createObjectURL(file),
           uploaded: false,
-          note: "Error de subida; vista previa local",
+          note: fatalMessage,
         });
       }
     }
 
     setUploads((prev) => [...nextUploads, ...prev]);
     setSelectedFiles([]);
-    setStatusMessage(`Se cargaron ${nextUploads.length} imagen${nextUploads.length > 1 ? "es" : ""} en lotes seguros.`);
+    setStatusMessage(
+      failedFiles.length > 0
+        ? `Se subieron ${successfulCount} de ${filesToUpload.length} fotos. Fallaron: ${failedFiles.join(", ")}.`
+        : `Se cargaron ${successfulCount} imagen${successfulCount !== 1 ? "es" : ""} correctamente.`,
+    );
     setIsUploading(false);
   };
 
@@ -501,7 +515,7 @@ export default function AdminPage() {
                     <td className="px-4 py-5 text-[#F4F1E8]">{match.vendas}</td>
                     <td className="px-4 py-5">
                       <div className="flex gap-4 text-[12.5px] text-[#8A9A93]">
-                        <a href="/galeria/pelusa-vs-lanus" className="hover:text-[#FFC94A]">Ver</a>
+                        <a href={match.slug ? `/galeria/${match.slug}` : "/galeria"} className="hover:text-[#FFC94A]">Ver</a>
                         <a href="/admin" className="hover:text-[#FFC94A]">Editar</a>
                       </div>
                     </td>

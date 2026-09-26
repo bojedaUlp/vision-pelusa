@@ -154,15 +154,16 @@ export async function getMatches(): Promise<MatchSummary[]> {
 
 export async function getMatchBySlug(slug: string): Promise<MatchSummary | undefined> {
   const normalizedSlug = resolveMatchSlug(slug);
+  const fallbackMatch = fallbackMatches.find((match) => match.slug === normalizedSlug) ?? fallbackMatches.find((match) => match.slug === slug);
 
   if (!isSupabaseConfigured()) {
-    return fallbackMatches.find((match) => match.slug === normalizedSlug) ?? fallbackMatches.find((match) => match.slug === slug) ?? fallbackMatches[0];
+    return fallbackMatch;
   }
 
   const supabase = getSupabaseClient();
 
   if (!supabase) {
-    return fallbackMatches.find((match) => match.slug === normalizedSlug) ?? fallbackMatches.find((match) => match.slug === slug) ?? fallbackMatches[0];
+    return fallbackMatch;
   }
 
   try {
@@ -173,7 +174,6 @@ export async function getMatchBySlug(slug: string): Promise<MatchSummary | undef
       .maybeSingle();
 
     if (error || !data) {
-      const fallbackMatch = fallbackMatches.find((match) => match.slug === normalizedSlug) ?? fallbackMatches.find((match) => match.slug === slug) ?? fallbackMatches[0];
       return fallbackMatch;
     }
 
@@ -197,21 +197,22 @@ export async function getMatchBySlug(slug: string): Promise<MatchSummary | undef
       status: data.status === "published" ? "Publicada" : "Borrador",
     };
   } catch {
-    return fallbackMatches.find((match) => match.slug === normalizedSlug) ?? fallbackMatches.find((match) => match.slug === slug) ?? fallbackMatches[0];
+    return fallbackMatch;
   }
 }
 
 export async function getPhotosByMatchSlug(slug: string): Promise<ProductPhoto[]> {
   const normalizedSlug = resolveMatchSlug(slug);
+  const fallbackMatch = fallbackMatches.find((match) => match.slug === normalizedSlug) ?? fallbackMatches.find((match) => match.slug === slug);
 
   if (!isSupabaseConfigured()) {
-    return fallbackPhotos;
+    return fallbackMatch ? fallbackPhotos : [];
   }
 
   const supabase = getSupabaseClient();
 
   if (!supabase) {
-    return fallbackPhotos;
+    return fallbackMatch ? fallbackPhotos : [];
   }
 
   try {
@@ -222,7 +223,7 @@ export async function getPhotosByMatchSlug(slug: string): Promise<ProductPhoto[]
       .maybeSingle();
 
     if (matchError || !matchData) {
-      return fallbackPhotos;
+      return fallbackMatch ? fallbackPhotos : [];
     }
 
     const { data, error } = await supabase
@@ -232,12 +233,12 @@ export async function getPhotosByMatchSlug(slug: string): Promise<ProductPhoto[]
       .order("sort_order", { ascending: true });
 
     if (error || !data || data.length === 0) {
-      return fallbackPhotos;
+      return fallbackMatch ? fallbackPhotos : [];
     }
 
     return data.map((photo) => formatPhoto(photo));
   } catch {
-    return fallbackPhotos;
+    return fallbackMatch ? fallbackPhotos : [];
   }
 }
 
@@ -346,6 +347,7 @@ export async function getAdminData() {
     const totalPhotos = photoRows.length;
 
     const matchRows = matchesData.map((match) => ({
+      slug: match.slug,
       title: match.title,
       subtitle: `${match.venue ?? "Cancha"} · ${new Date(match.played_at).toLocaleDateString("es-AR", {
         day: "2-digit",
