@@ -173,8 +173,13 @@ export async function getMatchBySlug(slug: string): Promise<MatchSummary | undef
       .eq("slug", normalizedSlug)
       .maybeSingle();
 
-    if (error || !data) {
+    if (error) {
+      console.error("getMatchBySlug failed", error);
       return fallbackMatch;
+    }
+
+    if (!data) {
+      return undefined;
     }
 
     return {
@@ -196,7 +201,8 @@ export async function getMatchBySlug(slug: string): Promise<MatchSummary | undef
       photoCount: Number(data.photo_count ?? 0),
       status: data.status === "published" ? "Publicada" : "Borrador",
     };
-  } catch {
+  } catch (error) {
+    console.error("getMatchBySlug unexpected error", error);
     return fallbackMatch;
   }
 }
@@ -222,8 +228,13 @@ export async function getPhotosByMatchSlug(slug: string): Promise<ProductPhoto[]
       .eq("slug", normalizedSlug)
       .maybeSingle();
 
-    if (matchError || !matchData) {
+    if (matchError) {
+      console.error("getPhotosByMatchSlug match lookup failed", matchError);
       return fallbackMatch ? fallbackPhotos : [];
+    }
+
+    if (!matchData) {
+      return [];
     }
 
     const { data, error } = await supabase
@@ -232,12 +243,14 @@ export async function getPhotosByMatchSlug(slug: string): Promise<ProductPhoto[]
       .eq("match_id", matchData.id)
       .order("sort_order", { ascending: true });
 
-    if (error || !data || data.length === 0) {
-      return fallbackMatch ? fallbackPhotos : [];
+    if (error) {
+      console.error("getPhotosByMatchSlug photos lookup failed", error);
+      return [];
     }
 
-    return data.map((photo) => formatPhoto(photo));
-  } catch {
+    return data ? data.map((photo) => formatPhoto(photo)) : [];
+  } catch (error) {
+    console.error("getPhotosByMatchSlug unexpected error", error);
     return fallbackMatch ? fallbackPhotos : [];
   }
 }
