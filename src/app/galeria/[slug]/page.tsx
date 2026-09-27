@@ -74,6 +74,7 @@ export default function GalleryPage() {
       getPhotosByMatchSlug(resolvedSlug),
     ])
       .then(([matchData, photos]) => {
+        console.log("Gallery page result:", { resolvedSlug, matchData, photos: photos ?? [], length: photos?.length ?? 0 });
         setMatch(matchData ?? null);
         setPhotoData(Array.isArray(photos) ? photos : []);
         setIsLoading(false);

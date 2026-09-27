@@ -301,7 +301,11 @@ export async function getPhotosByMatchSlug(slug: string): Promise<ProductPhoto[]
       ?? (matchData ?? []).find((row) => String(row.slug ?? "") === String(slug ?? ""))
       ?? (matchData ?? [])[0];
 
+    console.log("Gallery ID:", match?.id ?? null);
+    console.log("Slug consultado:", { slug, normalizedSlug, slugCandidates });
+
     if (!match) {
+      console.log("Galería no encontrada para el slug consultado.");
       return [];
     }
 
@@ -311,12 +315,19 @@ export async function getPhotosByMatchSlug(slug: string): Promise<ProductPhoto[]
       .eq("match_id", match.id)
       .order("sort_order", { ascending: true });
 
+    console.log("Fotos recibidas:", data ?? []);
+    console.log("Cantidad:", data?.length ?? 0);
+
     if (error) {
       console.error("getPhotosByMatchSlug photos lookup failed", error);
       return [];
     }
 
-    return data ? data.map((photo) => formatPhoto(photo)) : [];
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data.map((photo) => formatPhoto(photo));
   } catch (error) {
     console.error("getPhotosByMatchSlug unexpected error", error);
     return fallbackMatch ? fallbackPhotos : [];
