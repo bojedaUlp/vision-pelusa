@@ -43,7 +43,7 @@ const resolveMatchSlug = (slug: string) => {
   const key = String(slug ?? "").trim();
   const normalizedKey = normalizeGallerySlug(key);
   const legacyAlias = legacySlugMap[key] ?? legacySlugMap[normalizedKey];
-  return legacyAlias ?? normalizedKey || key;
+  return legacyAlias ?? (normalizedKey || key);
 };
 
 const formatMatchCard = (match: any) => ({
