@@ -19,11 +19,36 @@ const legacySlugMap: Record<string, string> = {
   "fecha-12": "pelusa-vs-boca",
 };
 
-const resolveMatchSlug = (slug: string) => legacySlugMap[slug] ?? slug;
+const normalizeGallerySlug = (value: string) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+
+  const decoded = (() => {
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  })();
+
+  return decoded
+    .toLocaleLowerCase("es-AR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+};
+
+const resolveMatchSlug = (slug: string) => {
+  const key = String(slug ?? "").trim();
+  const normalizedKey = normalizeGallerySlug(key);
+  const legacyAlias = legacySlugMap[key] ?? legacySlugMap[normalizedKey];
+  return legacyAlias ?? normalizedKey || key;
+};
 
 const formatMatchCard = (match: any) => ({
-  slug: match.slug,
-  tag: match.tag ?? match.slug?.replace(/-/g, " ") ?? "Partido",
+  slug: normalizeGallerySlug(match.slug ?? match.id ?? "") || String(match.slug ?? match.id ?? ""),
+  tag: match.tag ?? (match.slug ? match.slug.replace(/-/g, " ") : "Partido"),
   title: match.title,
   subtitle: match.subtitle ?? `${match.venue ?? "Cancha"} · ${match.played_at ? new Date(match.played_at).toLocaleDateString("es-AR", {
     day: "2-digit",
@@ -88,19 +113,40 @@ export async function getHomePageData() {
   }
 
   try {
-    const { data, error } = await supabase
+    const { data: matchesData, error: matchesError } = await supabase
       .from("matches")
       .select("*")
       .order("played_at", { ascending: false })
       .limit(3);
 
-    if (error || !data || data.length === 0) {
+    if (matchesError || !matchesData || matchesData.length === 0) {
       return fallback;
+    }
+
+    const { data: photosData, error: photosError } = await supabase
+      .from("photos")
+      .select("*")
+      .order("sort_order", { ascending: true });
+
+    const coverByMatch = new Map<string, string>();
+    if (!photosError && photosData) {
+      for (const photo of photosData) {
+        const matchId = String(photo.match_id ?? "");
+        if (!matchId || coverByMatch.has(matchId)) continue;
+
+        const coverUrl = String((photo as any).cover_image ?? photo.image_url ?? "").trim();
+        if (coverUrl) {
+          coverByMatch.set(matchId, coverUrl);
+        }
+      }
     }
 
     return {
       ...fallback,
-      galleryCards: data.map((match) => formatMatchCard(match)),
+      galleryCards: matchesData.map((match) => formatMatchCard({
+        ...match,
+        cover_url: coverByMatch.get(String(match.id)) ?? match.cover_url ?? undefined,
+      })),
     };
   } catch {
     return fallback;
@@ -167,39 +213,50 @@ export async function getMatchBySlug(slug: string): Promise<MatchSummary | undef
   }
 
   try {
+    const slugCandidates = Array.from(new Set([
+      String(slug ?? "").trim(),
+      decodeURIComponent(String(slug ?? "")).trim(),
+      normalizedSlug,
+      normalizeGallerySlug(String(slug ?? "")),
+    ].filter(Boolean)));
+
     const { data, error } = await supabase
       .from("matches")
       .select("*")
-      .eq("slug", normalizedSlug)
-      .maybeSingle();
+      .in("slug", slugCandidates)
+      .limit(20);
 
     if (error) {
       console.error("getMatchBySlug failed", error);
       return fallbackMatch;
     }
 
-    if (!data) {
+    const match = (data ?? []).find((row) => normalizeGallerySlug(String(row.slug ?? "")) === normalizedSlug)
+      ?? (data ?? []).find((row) => String(row.slug ?? "") === String(slug ?? ""))
+      ?? (data ?? [])[0];
+
+    if (!match) {
       return undefined;
     }
 
     return {
-      slug: data.slug,
-      tag: data.tag ?? "Partido",
-      title: data.title,
-      subtitle: data.subtitle ?? `${data.venue ?? "Cancha"} · ${new Date(data.played_at).toLocaleDateString("es-AR", {
+      slug: match.slug,
+      tag: match.tag ?? "Partido",
+      title: match.title,
+      subtitle: match.subtitle ?? `${match.venue ?? "Cancha"} · ${new Date(match.played_at).toLocaleDateString("es-AR", {
         day: "2-digit",
         month: "short",
         year: "numeric",
       })}`,
-      price: data.price ?? "$6.000",
-      venue: data.venue ?? "Cancha Norte",
-      date: new Date(data.played_at).toLocaleDateString("es-AR", {
+      price: match.price ?? "$6.000",
+      venue: match.venue ?? "Cancha Norte",
+      date: new Date(match.played_at).toLocaleDateString("es-AR", {
         day: "2-digit",
         month: "short",
         year: "numeric",
       }),
-      photoCount: Number(data.photo_count ?? 0),
-      status: data.status === "published" ? "Publicada" : "Borrador",
+      photoCount: Number(match.photo_count ?? 0),
+      status: match.status === "published" ? "Publicada" : "Borrador",
     };
   } catch (error) {
     console.error("getMatchBySlug unexpected error", error);
@@ -222,25 +279,36 @@ export async function getPhotosByMatchSlug(slug: string): Promise<ProductPhoto[]
   }
 
   try {
+    const slugCandidates = Array.from(new Set([
+      String(slug ?? "").trim(),
+      decodeURIComponent(String(slug ?? "")).trim(),
+      normalizedSlug,
+      normalizeGallerySlug(String(slug ?? "")),
+    ].filter(Boolean)));
+
     const { data: matchData, error: matchError } = await supabase
       .from("matches")
-      .select("id")
-      .eq("slug", normalizedSlug)
-      .maybeSingle();
+      .select("id, slug")
+      .in("slug", slugCandidates)
+      .limit(20);
 
     if (matchError) {
       console.error("getPhotosByMatchSlug match lookup failed", matchError);
       return fallbackMatch ? fallbackPhotos : [];
     }
 
-    if (!matchData) {
+    const match = (matchData ?? []).find((row) => normalizeGallerySlug(String(row.slug ?? "")) === normalizedSlug)
+      ?? (matchData ?? []).find((row) => String(row.slug ?? "") === String(slug ?? ""))
+      ?? (matchData ?? [])[0];
+
+    if (!match) {
       return [];
     }
 
     const { data, error } = await supabase
       .from("photos")
       .select("*")
-      .eq("match_id", matchData.id)
+      .eq("match_id", match.id)
       .order("sort_order", { ascending: true });
 
     if (error) {
