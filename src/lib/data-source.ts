@@ -47,7 +47,7 @@ const resolveMatchSlug = (slug: string) => {
 };
 
 const formatMatchCard = (match: any) => ({
-  slug: normalizeGallerySlug(match.slug ?? match.id ?? "") || String(match.slug ?? match.id ?? ""),
+  slug: String(match.id ?? match.slug ?? ""),
   tag: match.tag ?? (match.slug ? match.slug.replace(/-/g, " ") : "Partido"),
   title: match.title,
   subtitle: match.subtitle ?? `${match.venue ?? "Cancha"} · ${match.played_at ? new Date(match.played_at).toLocaleDateString("es-AR", {
@@ -213,28 +213,19 @@ export async function getMatchBySlug(slug: string): Promise<MatchSummary | undef
   }
 
   try {
-    const slugCandidates = Array.from(new Set([
-      String(slug ?? "").trim(),
-      decodeURIComponent(String(slug ?? "")).trim(),
-      normalizedSlug,
-      normalizeGallerySlug(String(slug ?? "")),
-    ].filter(Boolean)));
+    const routeValue = String(slug ?? "").trim();
+    const isUuidRoute = /^[0-9a-fA-F-]{36}$/.test(routeValue);
 
-    const { data, error } = await supabase
-      .from("matches")
-      .select("*")
-      .in("slug", slugCandidates)
-      .limit(20);
+    const { data, error } = isUuidRoute
+      ? await supabase.from("matches").select("*").eq("id", routeValue).limit(1)
+      : await supabase.from("matches").select("*").eq("slug", routeValue).limit(1);
 
     if (error) {
       console.error("getMatchBySlug failed", error);
       return fallbackMatch;
     }
 
-    const match = (data ?? []).find((row) => normalizeGallerySlug(String(row.slug ?? "")) === normalizedSlug)
-      ?? (data ?? []).find((row) => String(row.slug ?? "") === String(slug ?? ""))
-      ?? (data ?? [])[0];
-
+    const match = (data ?? [])[0];
     if (!match) {
       return undefined;
     }
@@ -279,33 +270,21 @@ export async function getPhotosByMatchSlug(slug: string): Promise<ProductPhoto[]
   }
 
   try {
-    const slugCandidates = Array.from(new Set([
-      String(slug ?? "").trim(),
-      decodeURIComponent(String(slug ?? "")).trim(),
-      normalizedSlug,
-      normalizeGallerySlug(String(slug ?? "")),
-    ].filter(Boolean)));
+    const routeValue = String(slug ?? "").trim();
+    const isUuidRoute = /^[0-9a-fA-F-]{36}$/.test(routeValue);
 
-    const { data: matchData, error: matchError } = await supabase
-      .from("matches")
-      .select("id, slug")
-      .in("slug", slugCandidates)
-      .limit(20);
+    const { data: matchData, error: matchError } = isUuidRoute
+      ? await supabase.from("matches").select("id, slug").eq("id", routeValue).limit(1)
+      : await supabase.from("matches").select("id, slug").eq("slug", routeValue).limit(1);
 
     if (matchError) {
       console.error("getPhotosByMatchSlug match lookup failed", matchError);
       return fallbackMatch ? fallbackPhotos : [];
     }
 
-    const match = (matchData ?? []).find((row) => normalizeGallerySlug(String(row.slug ?? "")) === normalizedSlug)
-      ?? (matchData ?? []).find((row) => String(row.slug ?? "") === String(slug ?? ""))
-      ?? (matchData ?? [])[0];
-
-    console.log("Gallery ID:", match?.id ?? null);
-    console.log("Slug consultado:", { slug, normalizedSlug, slugCandidates });
-
+    const match = (matchData ?? [])[0];
     if (!match) {
-      console.log("Galería no encontrada para el slug consultado.");
+      console.log("Galería no encontrada para el identificador consultado.");
       return [];
     }
 
@@ -315,6 +294,7 @@ export async function getPhotosByMatchSlug(slug: string): Promise<ProductPhoto[]
       .eq("match_id", match.id)
       .order("sort_order", { ascending: true });
 
+    console.log("Gallery ID:", match.id);
     console.log("Fotos recibidas:", data ?? []);
     console.log("Cantidad:", data?.length ?? 0);
 
