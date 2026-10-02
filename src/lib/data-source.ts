@@ -59,6 +59,90 @@ const formatMatchCard = (match: any) => ({
   imageUrl: match.cover_url ?? match.image_url ?? undefined,
 });
 
+// Published galleries for cards: the cover (first photo by sort_order, same rule as before) is
+// embedded in the same query, limited to one row per gallery, instead of downloading every photo.
+const GALLERY_CARD_SELECT = "*, photos(image_url, sort_order)";
+
+const withEmbeddedCover = (match: any) => {
+  const firstPhoto = Array.isArray(match.photos) ? match.photos[0] : null;
+  const coverUrl = String(firstPhoto?.image_url ?? "").trim();
+  return formatMatchCard({ ...match, cover_url: coverUrl || match.cover_url || undefined });
+};
+
+export const HOME_GALLERY_LIMIT = 6;
+export const GALLERIES_PAGE_SIZE = 12;
+
+export type GallerySort = "recent" | "oldest" | "name";
+
+export type GalleryCardData = HomePageData["galleryCards"][number];
+
+export type PublishedGalleriesResult =
+  | { status: "ok"; cards: GalleryCardData[]; total: number; page: number; totalPages: number }
+  | { status: "out_of_range" }
+  | { status: "error" };
+
+// Keeps letters, numbers, spaces and a few name characters. Removes PostgREST filter syntax
+// (commas, parentheses, quotes) and LIKE wildcards so the term is matched literally.
+export const sanitizeGallerySearch = (value: string) =>
+  String(value ?? "")
+    .normalize("NFC")
+    .replace(/[^\p{L}\p{N}\s.\-'&]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+
+export async function getPublishedGalleries(input: { page: number; q: string; sort: GallerySort }): Promise<PublishedGalleriesResult> {
+  if (!isSupabaseConfigured()) {
+    return { status: "error" };
+  }
+
+  const page = Number.isInteger(input.page) && input.page > 0 ? input.page : 1;
+  const from = (page - 1) * GALLERIES_PAGE_SIZE;
+  const to = from + GALLERIES_PAGE_SIZE - 1;
+  const term = sanitizeGallerySearch(input.q);
+
+  try {
+    let query = getSupabaseClient()
+      .from("matches")
+      .select(GALLERY_CARD_SELECT, { count: "exact" })
+      .eq("status", "published");
+
+    if (term) {
+      query = query.or(`title.ilike."%${term}%",subtitle.ilike."%${term}%"`);
+    }
+
+    query =
+      input.sort === "name"
+        ? query.order("title", { ascending: true })
+        : query.order("played_at", { ascending: input.sort === "oldest" });
+
+    const { data, error, count } = await query
+      .order("id", { ascending: true })
+      .order("sort_order", { ascending: true, referencedTable: "photos" })
+      .limit(1, { referencedTable: "photos" })
+      .range(from, to);
+
+    if (error) {
+      // PostgREST answers 416 / PGRST103 when the page starts past the last row.
+      if (error.code === "PGRST103") return { status: "out_of_range" };
+      console.error("getPublishedGalleries failed", error);
+      return { status: "error" };
+    }
+
+    const total = count ?? 0;
+    return {
+      status: "ok",
+      cards: (data ?? []).map(withEmbeddedCover),
+      total,
+      page,
+      totalPages: Math.max(1, Math.ceil(total / GALLERIES_PAGE_SIZE)),
+    };
+  } catch (error) {
+    console.error("getPublishedGalleries unexpected error", error);
+    return { status: "error" };
+  }
+}
+
 const formatPhoto = (photo: any, index = 0): ProductPhoto => {
   // id is the real photos.id UUID (used for selection and checkout);
   // number is only the visual position in the sort_order-ordered result.
@@ -114,40 +198,23 @@ export async function getHomePageData() {
   }
 
   try {
+    // Only the 6 most recent published galleries, limited at the source.
     const { data: matchesData, error: matchesError } = await supabase
       .from("matches")
-      .select("*")
+      .select(GALLERY_CARD_SELECT)
+      .eq("status", "published")
       .order("played_at", { ascending: false })
-      .limit(3);
+      .order("sort_order", { ascending: true, referencedTable: "photos" })
+      .limit(1, { referencedTable: "photos" })
+      .limit(HOME_GALLERY_LIMIT);
 
     if (matchesError || !matchesData || matchesData.length === 0) {
       return fallback;
     }
 
-    const { data: photosData, error: photosError } = await supabase
-      .from("photos")
-      .select("*")
-      .order("sort_order", { ascending: true });
-
-    const coverByMatch = new Map<string, string>();
-    if (!photosError && photosData) {
-      for (const photo of photosData) {
-        const matchId = String(photo.match_id ?? "");
-        if (!matchId || coverByMatch.has(matchId)) continue;
-
-        const coverUrl = String((photo as any).cover_image ?? photo.image_url ?? "").trim();
-        if (coverUrl) {
-          coverByMatch.set(matchId, coverUrl);
-        }
-      }
-    }
-
     return {
       ...fallback,
-      galleryCards: matchesData.map((match) => formatMatchCard({
-        ...match,
-        cover_url: coverByMatch.get(String(match.id)) ?? match.cover_url ?? undefined,
-      })),
+      galleryCards: matchesData.map(withEmbeddedCover),
     };
   } catch {
     return fallback;
@@ -417,6 +484,7 @@ export async function getAdminData() {
     const totalPhotos = photoRows.length;
 
     const matchRows = matchesData.map((match) => ({
+      id: String(match.id),
       slug: match.slug,
       title: match.title,
       subtitle: `${match.venue ?? "Cancha"} · ${new Date(match.played_at).toLocaleDateString("es-AR", {

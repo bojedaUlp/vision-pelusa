@@ -1,8 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { GalleryCard } from "@/components/gallery-card";
+import { SiteHeader } from "@/components/site-header";
 import { getHomePageData } from "@/lib/data-source";
 import { emptyHomePageData, type HomePageData } from "@/lib/mock-data";
+
+// Footer destinations for the existing nav items; anything without a real destination keeps "#".
+const footerHrefByItem: Record<string, string> = {
+  Inicio: "/",
+  Galerías: "/galerias",
+  "Cómo funciona": "/#como-funciona",
+  Contacto: "/#contacto",
+  "Mis fotos": "/compras",
+  "Comprar fotos": "/galerias",
+};
 
 const defaultHomePageData = {
   ...emptyHomePageData,
@@ -119,48 +132,11 @@ export default function Home() {
   // Hero photo: cover of the most recent gallery, already loaded for "Galerías recientes".
   const heroImageUrl = galleryCards.find((card) => card.imageUrl)?.imageUrl;
 
-  const navHrefByItem: Record<string, string> = {
-    Inicio: "/",
-    Galerías: "#galerias",
-    "Cómo funciona": "#como-funciona",
-    Contacto: "#contacto",
-  };
-
   return (
     <div className="min-h-screen bg-[#0B0F14] text-[#F4F1E8]">
       <div className="grain" />
 
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0B0F14]/80 backdrop-blur-md">
-        <div className="section-shell flex items-center justify-between gap-3 py-4">
-          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-            <img src="/logo-vision-pelusa.svg" alt="Visión Pelusa" className="logo-mark" />
-            <span className="hidden truncate whitespace-nowrap text-[12px] font-semibold tracking-[0.08em] text-[#F4F1E8] sm:block sm:text-[14px] md:max-lg:hidden">Visión Pelusa</span>
-          </div>
-
-          <nav className="hidden items-center gap-4 whitespace-nowrap text-[13px] font-medium text-[#8A9A93] md:flex lg:gap-8 lg:text-sm">
-            {navItems.map((item) => (
-              <a key={item} href={navHrefByItem[item] ?? "/"} className="transition-colors hover:text-[#F4F1E8]">
-                {item}
-              </a>
-            ))}
-            <a href="/compras" className="transition-colors hover:text-[#F4F1E8]">
-              Mis fotos
-            </a>
-          </nav>
-
-          <div className="flex shrink-0 items-center gap-2 whitespace-nowrap sm:gap-3">
-            <a href="/compras" className="px-1 py-2 text-[10px] font-medium uppercase tracking-[0.06em] text-[#8A9A93] transition-colors hover:text-[#F4F1E8] sm:text-[12px] md:hidden">
-              Mis fotos
-            </a>
-            <a href="/admin" className="inline-flex items-center justify-center rounded-sm border border-white/10 px-2.5 py-2 text-[9px] font-semibold uppercase tracking-[0.06em] text-[#F4F1E8] transition-colors hover:border-[#FFC94A]/60 hover:text-[#FFC94A] sm:px-4 sm:py-2.5 sm:text-[11px] md:max-lg:px-3 md:max-lg:text-[10px]">
-              Panel admin
-            </a>
-            <a href="/#galerias" className="inline-flex items-center justify-center rounded-sm bg-[#FFC94A] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14] transition-transform hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(255,201,74,0.25)] sm:px-5 sm:py-3 sm:text-[13px] md:max-lg:px-4 md:max-lg:text-[12px]">
-              Comprar fotos
-            </a>
-          </div>
-        </div>
-      </header>
+      <SiteHeader />
 
       <main>
         <section className="hero-glow group relative overflow-hidden">
@@ -203,9 +179,9 @@ export default function Home() {
 
               <div className="hero-actions mt-8 inline-block w-full max-w-[420px] p-[6px] sm:mt-10 sm:w-auto">
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-                  <a href="#galerias" className="inline-flex items-center justify-center rounded-sm bg-[#FFC94A] px-5 py-3 text-[12px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14] transition-transform hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(255,201,74,0.25)] sm:px-6 sm:text-[13px]">
+                  <Link href="/galerias" className="inline-flex items-center justify-center rounded-sm bg-[#FFC94A] px-5 py-3 text-[12px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14] transition-transform hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(255,201,74,0.25)] sm:px-6 sm:text-[13px]">
                     Buscar mi partido
-                  </a>
+                  </Link>
                   <a href="#como-funciona" className="inline-flex items-center justify-center rounded-sm border border-white/15 bg-transparent px-5 py-3 text-[12px] font-semibold uppercase tracking-[0.04em] text-[#F4F1E8] transition-colors hover:border-[#F4F1E8] sm:px-6 sm:text-[13px]">
                     Cómo funciona
                   </a>
@@ -275,64 +251,14 @@ export default function Home() {
                 Galerías recientes
               </div>
               <h2 className="text-[clamp(26px,5vw,42px)] text-[#F4F1E8]">
-                Lo más visto esta semana.
+                Últimos partidos.
               </h2>
             </div>
 
             {galleryCards.length > 0 ? (
               <div className="grid-float grid gap-6 md:grid-cols-3">
                 {galleryCards.map((card, index) => (
-                  <a key={card.title} href={`/galeria/${card.slug}`} className="card-rise group block overflow-hidden border border-white/10 bg-[#111820]">
-                    <article className="h-full">
-                      <div className="relative aspect-[4/3] overflow-hidden">
-                        <div
-                          className="absolute inset-0 bg-cover bg-center bg-no-repeat transition-transform duration-500 group-hover:scale-105"
-                          style={{
-                            backgroundImage: card.imageUrl ? `url(${card.imageUrl})` : undefined,
-                            backgroundColor:
-                              index === 0
-                                ? "#1B4332"
-                                : index === 1
-                                  ? "#2b5c46"
-                                  : "#173c2c",
-                          }}
-                        />
-                        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.06),rgba(0,0,0,0.28))]" />
-                        <div className="absolute inset-[-20%_-50%] flex flex-wrap content-around rotate-[-18deg] opacity-20">
-                          {Array.from({ length: 5 }).map((_, i) => (
-                            <span key={i} className="mono w-full text-center text-[11px] uppercase tracking-[0.15em] text-[#F4F1E8]">
-                              Visión Pelusa
-                            </span>
-                          ))}
-                        </div>
-                        <div className="relative z-10 flex h-full items-center justify-center mono text-[12px] uppercase tracking-[0.1em] text-white/80">
-                          {card.tag}
-                        </div>
-                        <span className="absolute left-3 top-3 h-4 w-4 border-l-2 border-t-2 border-[#FFC94A] opacity-0 transition-opacity group-hover:opacity-100" />
-                        <span className="absolute right-3 top-3 h-4 w-4 border-r-2 border-t-2 border-[#FFC94A] opacity-0 transition-opacity group-hover:opacity-100" />
-                        <span className="absolute bottom-3 left-3 h-4 w-4 border-l-2 border-b-2 border-[#FFC94A] opacity-0 transition-opacity group-hover:opacity-100" />
-                        <span className="absolute bottom-3 right-3 h-4 w-4 border-r-2 border-b-2 border-[#FFC94A] opacity-0 transition-opacity group-hover:opacity-100" />
-                      </div>
-
-                      <div className="p-5">
-                        <div className="mono mb-2 text-[10.5px] uppercase tracking-[0.12em] text-[#FFC94A]">
-                          {card.tag}
-                        </div>
-                        <h3 className="mb-2 text-[17px] font-semibold text-[#F4F1E8]">{card.title}</h3>
-                        <p className="mb-5 text-[13px] text-[#8A9A93]">{card.subtitle}</p>
-
-                        <div className="flex items-center justify-between border-t border-white/10 pt-4">
-                          <div>
-                            <div className="mono text-[15px] text-[#F4F1E8]">{card.price}</div>
-                            <span className="block text-[11px] text-[#8A9A93]">por paquete</span>
-                          </div>
-                          <span className="flex items-center gap-2 text-[12px] text-[#8A9A93]">
-                            <span>🔒</span> Acceso seguro
-                          </span>
-                        </div>
-                      </div>
-                    </article>
-                  </a>
+                  <GalleryCard key={card.slug} card={card} index={index} />
                 ))}
               </div>
             ) : (
@@ -341,6 +267,17 @@ export default function Home() {
                 <h3 className="mt-4 text-[22px] text-[#F4F1E8]">Todavía no hay galerías publicadas.</h3>
               </div>
             )}
+
+            {galleryCards.length > 0 ? (
+              <div className="mt-10 flex justify-center">
+                <Link
+                  href="/galerias"
+                  className="inline-flex items-center justify-center gap-2 rounded-sm border border-white/15 px-6 py-3 text-[12px] font-semibold uppercase tracking-[0.06em] text-[#F4F1E8] transition-colors hover:border-[#FFC94A]/70 hover:text-[#FFC94A] sm:text-[13px]"
+                >
+                  Ver todas las galerías <span aria-hidden="true">→</span>
+                </Link>
+              </div>
+            ) : null}
           </div>
         </section>
 
@@ -410,11 +347,17 @@ export default function Home() {
             </div>
 
             <nav className="flex flex-wrap gap-6 text-[13px] text-[#8A9A93]">
-              {navItems.map((item) => (
-                <a key={item} href="#" className="transition-colors hover:text-[#F4F1E8]">
-                  {item}
-                </a>
-              ))}
+              {navItems.map((item) =>
+                footerHrefByItem[item] ? (
+                  <Link key={item} href={footerHrefByItem[item]} className="transition-colors hover:text-[#F4F1E8]">
+                    {item}
+                  </Link>
+                ) : (
+                  <a key={item} href="#" className="transition-colors hover:text-[#F4F1E8]">
+                    {item}
+                  </a>
+                ),
+              )}
             </nav>
           </div>
           <p className="mt-6 text-[12px] text-[#8A9A93]">© 2026 Visión Pelusa. Fotografía de la Liga Sanluiseña.</p>

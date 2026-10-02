@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { clearAdminSession, getCurrentAdminProfile, isAdminSessionActive, setAdminSession } from "@/lib/admin-auth";
 import { getAdminData } from "@/lib/data-source";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
@@ -14,9 +14,18 @@ type UploadItem = {
 
 const MAX_UPLOAD_BATCH = 100;
 
+// No default gallery: the form starts empty so nothing can be created or targeted implicitly.
+const emptyGalleryForm = {
+  title: "",
+  subtitle: "",
+  slug: "",
+  price: "$6.000",
+  status: "Publicada",
+};
+
 export default function AdminPage() {
   const [stats, setStats] = useState<Array<{ value: string; label: string }>>([]);
-  const [matches, setMatches] = useState<Array<{ slug: string; title: string; subtitle: string; photos: number; status: string; vendas: number }>>([]);
+  const [matches, setMatches] = useState<Array<{ id?: string; slug: string; title: string; subtitle: string; photos: number; status: string; vendas: number }>>([]);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploads, setUploads] = useState<UploadItem[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -26,13 +35,11 @@ export default function AdminPage() {
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
-  const [form, setForm] = useState({
-    title: "Pelusa vs Lanús",
-    subtitle: "Cancha Norte · 16 ago 2026",
-    slug: "pelusa-vs-lanus",
-    price: "$6.000",
-    status: "Publicada",
-  });
+  const [form, setForm] = useState(emptyGalleryForm);
+  // Single source of truth for the gallery being edited and receiving uploads: matches.id (UUID).
+  const [selectedGalleryId, setSelectedGalleryId] = useState<string | null>(null);
+  const [isSavingGallery, setIsSavingGallery] = useState(false);
+  const editRequestRef = useRef(0);
 
   const loadAdminData = async () => {
     const data = await getAdminData();
@@ -138,6 +145,97 @@ export default function AdminPage() {
     return Number.isFinite(digits) && digits > 0 ? digits : 1500;
   };
 
+  const handleNewGallery = () => {
+    editRequestRef.current += 1;
+    setSelectedGalleryId(null);
+    setForm(emptyGalleryForm);
+    setSelectedFiles([]);
+    setStatusMessage("Completá los datos y creá la galería antes de subir fotos.");
+  };
+
+  const handleEditGallery = async (galleryId: string) => {
+    const requestId = ++editRequestRef.current;
+    // Clear the previous selection first so no stale UUID can receive uploads while loading.
+    setSelectedGalleryId(null);
+    setForm((prev) => ({ ...emptyGalleryForm, price: prev.price }));
+    setSelectedFiles([]);
+    setStatusMessage("Cargando galería...");
+
+    const { data, error } = await getSupabaseClient()
+      .from("matches")
+      .select("id, title, slug, subtitle, status")
+      .eq("id", galleryId)
+      .single();
+
+    if (requestId !== editRequestRef.current) return; // a newer Editar/Nuevo click won
+
+    if (error || !data) {
+      setStatusMessage(`No se pudo cargar la galería: ${error?.message ?? "no encontrada"}`);
+      return;
+    }
+
+    setSelectedGalleryId(String(data.id));
+    setForm((prev) => ({
+      ...prev,
+      title: data.title ?? "",
+      slug: data.slug ?? "",
+      subtitle: data.subtitle ?? "",
+      status: data.status === "published" ? "Publicada" : "Borrador",
+    }));
+    setStatusMessage(`Editando "${data.title}". Las fotos se subirán a esta galería.`);
+  };
+
+  const handleSaveGallery = async () => {
+    const title = form.title.trim();
+    const slug = form.slug.trim();
+    const subtitle = form.subtitle.trim();
+
+    if (!title || !slug) {
+      setStatusMessage("Completá el título y el slug de la galería.");
+      return;
+    }
+
+    const venue = subtitle.includes("·") ? subtitle.split("·")[0].trim() : "Cancha Norte";
+    const status = form.status === "Publicada" ? "published" : "draft";
+    const supabase = getSupabaseClient();
+    const editingId = selectedGalleryId;
+
+    setIsSavingGallery(true);
+    try {
+      // Editar → UPDATE by matches.id. Nueva → INSERT (never upsert by slug, which silently
+      // reused whatever gallery already owned that slug).
+      const { data, error } = editingId
+        ? await supabase
+            .from("matches")
+            .update({ title, slug, subtitle, venue, status })
+            .eq("id", editingId)
+            .select("id, title")
+            .single()
+        : await supabase
+            .from("matches")
+            .insert({ title, slug, subtitle, venue, status, played_at: new Date().toISOString(), cover_url: "" })
+            .select("id, title")
+            .single();
+
+      if (error || !data) {
+        throw new Error(error?.message ?? "Supabase no devolvió la galería.");
+      }
+
+      editRequestRef.current += 1;
+      setSelectedGalleryId(String(data.id));
+      setStatusMessage(
+        editingId
+          ? `Cambios guardados en "${data.title}".`
+          : `Galería "${data.title}" creada. Ya podés subir fotos.`,
+      );
+      await loadAdminData();
+    } catch (error) {
+      setStatusMessage(`No se pudo guardar la galería: ${error instanceof Error ? error.message : "error desconocido"}`);
+    } finally {
+      setIsSavingGallery(false);
+    }
+  };
+
   const handleFiles = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
     if (files.length > MAX_UPLOAD_BATCH) {
@@ -150,6 +248,13 @@ export default function AdminPage() {
   };
 
   const handleUpload = async () => {
+    // Captured once: every photo of this batch goes to the gallery selected when the upload started.
+    const galleryId = selectedGalleryId;
+    if (!galleryId) {
+      setStatusMessage("Seleccioná o creá una galería antes de subir fotos.");
+      return;
+    }
+
     if (!selectedFiles.length) {
       setStatusMessage("Debés seleccionar al menos una foto primero.");
       return;
@@ -166,37 +271,9 @@ export default function AdminPage() {
 
     try {
       if (supabase) {
-        const slug = (form.slug ?? "").trim() || `album-${Date.now()}`;
-        const title = (form.title ?? "").trim() || "Nuevo partido";
-        const subtitle = (form.subtitle ?? "").trim() || "Galería nueva";
-        const venue = subtitle.includes("·") ? subtitle.split("·")[0].trim() : "Cancha Norte";
-        const playedAt = new Date().toISOString();
-        const status = form.status === "Publicada" ? "published" : "draft";
-
-        const { data: matchData, error: matchError } = await supabase
-          .from("matches")
-          .upsert(
-            {
-              slug,
-              title,
-              subtitle,
-              venue,
-              played_at: playedAt,
-              status,
-              cover_url: "",
-            },
-            { onConflict: "slug" },
-          )
-          .select()
-          .single();
-
-        if (matchError || !matchData) {
-          throw new Error(matchError?.message ?? "No se pudo crear o actualizar la galería.");
-        }
-
         for (const [index, file] of filesToUpload.entries()) {
           const fileName = `${Date.now()}-${index}-${file.name.replace(/\s+/g, "-")}`;
-          const storagePath = `${slug}/${fileName}`;
+          const storagePath = `${galleryId}/${fileName}`;
 
           try {
             const { data, error } = await supabase.storage.from("photos").upload(storagePath, file, { upsert: true });
@@ -211,7 +288,7 @@ export default function AdminPage() {
 
             const { error: insertError } = await supabase.from("photos").insert([
               {
-                match_id: matchData.id,
+                match_id: galleryId,
                 title: file.name,
                 sort_order: index,
                 price: parsePriceValue(form.price),
@@ -271,6 +348,9 @@ export default function AdminPage() {
 
     setUploads((prev) => [...nextUploads, ...prev]);
     setSelectedFiles([]);
+    if (successfulCount > 0) {
+      void loadAdminData();
+    }
     setStatusMessage(
       failedFiles.length > 0
         ? `Se subieron ${successfulCount} de ${filesToUpload.length} fotos. Fallaron: ${failedFiles.join(", ")}.`
@@ -379,7 +459,7 @@ export default function AdminPage() {
             <h1 className="text-[28px] font-semibold text-[#F4F1E8]">Mis galerías</h1>
             <p className="mt-2 text-[13.5px] text-[#8A9A93]">Subí, organizá y publicá cada partido de la temporada.</p>
           </div>
-          <button type="button" className="bg-[#FFC94A] px-5 py-3 text-[13px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14]">
+          <button type="button" onClick={handleNewGallery} disabled={isUploading || isSavingGallery} className="bg-[#FFC94A] px-5 py-3 text-[13px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14] disabled:cursor-not-allowed disabled:opacity-60">
             + Nuevo partido
           </button>
         </div>
@@ -396,7 +476,7 @@ export default function AdminPage() {
         <div className="mb-8 grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
           <div className="rounded-[5px] border border-white/10 bg-[#111820] p-6">
             <div className="mb-5 flex items-center justify-between gap-3">
-              <h2 className="text-[16px] font-semibold text-[#F4F1E8]">Crear nueva galería</h2>
+              <h2 className="text-[16px] font-semibold text-[#F4F1E8]">{selectedGalleryId ? "Editar galería" : "Crear nueva galería"}</h2>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
@@ -448,6 +528,15 @@ export default function AdminPage() {
                 </select>
               </label>
             </div>
+
+            <button
+              type="button"
+              disabled={isSavingGallery || isUploading}
+              onClick={() => void handleSaveGallery()}
+              className="mt-5 border border-[#FFC94A]/60 px-4 py-2.5 text-[12px] font-semibold uppercase tracking-[0.08em] text-[#FFC94A] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSavingGallery ? "Guardando..." : selectedGalleryId ? "Guardar cambios" : "Crear galería"}
+            </button>
           </div>
 
           <div className="rounded-[5px] border border-white/10 bg-[#111820] p-6">
@@ -470,9 +559,15 @@ export default function AdminPage() {
               )}
             </div>
 
+            <p className="mt-4 text-[12px] text-[#8A9A93]">
+              {selectedGalleryId
+                ? `Destino: ${form.title || "galería seleccionada"}`
+                : "Seleccioná o creá una galería antes de subir fotos."}
+            </p>
+
             <button
               type="button"
-              disabled={isUploading}
+              disabled={isUploading || !selectedGalleryId}
               onClick={handleUpload}
               className="mt-5 w-full bg-[#FFC94A] px-4 py-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-[#0B0F14] disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -501,7 +596,7 @@ export default function AdminPage() {
               </thead>
               <tbody>
                 {matches.map((match) => (
-                  <tr key={match.title} className="border-b border-white/10 last:border-b-0">
+                  <tr key={match.id ?? match.slug} className="border-b border-white/10 last:border-b-0">
                     <td className="px-4 py-5">
                       <div className="font-semibold text-[#F4F1E8]">{match.title}</div>
                       <div className="mt-1 text-[12px] text-[#8A9A93]">{match.subtitle}</div>
@@ -516,7 +611,14 @@ export default function AdminPage() {
                     <td className="px-4 py-5">
                       <div className="flex gap-4 text-[12.5px] text-[#8A9A93]">
                         <a href={match.slug ? `/galeria/${match.slug}` : "/galeria"} className="hover:text-[#FFC94A]">Ver</a>
-                        <a href="/admin" className="hover:text-[#FFC94A]">Editar</a>
+                        <button
+                          type="button"
+                          disabled={!match.id || isUploading || isSavingGallery}
+                          onClick={() => match.id && void handleEditGallery(match.id)}
+                          className="hover:text-[#FFC94A] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Editar
+                        </button>
                       </div>
                     </td>
                   </tr>
