@@ -1,6 +1,7 @@
 import "server-only";
 
-import { getSupabaseAdmin } from "./supabase-admin";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { getSupabaseAdmin, SupabaseAdminConfigError } from "./supabase-admin";
 import { getPriceForCount } from "./mock-data";
 import {
   createMercadoPagoPreference,
@@ -41,9 +42,40 @@ function fail(context: string, error: unknown): never {
 /* -------------------------------------------------------------------------- */
 
 export class CheckoutStageError extends Error {
-  constructor(public readonly stage: "CONFIG" | "PHOTOS" | "PURCHASE" | "PURCHASE_ITEMS" | "MERCADO_PAGO" | "PREFERENCE_UPDATE", message: string) {
+  constructor(
+    public readonly stage: "CONFIG" | "PHOTOS" | "PURCHASE" | "PURCHASE_ITEMS" | "MERCADO_PAGO" | "PREFERENCE_UPDATE",
+    message: string,
+    // Safe, value-free identifier (e.g. MISSING_SERVICE_ROLE) that the API may return.
+    public readonly code?: string,
+  ) {
     super(`[${stage}] ${message}`);
   }
+}
+
+// Presence only (booleans), never values. Compares the raw Cloudflare Worker bindings with
+// process.env to tell "secret missing in Cloudflare" apart from "not exposed to process.env".
+function logConfigPresence() {
+  let workerEnv: Record<string, unknown> | null = null;
+  try {
+    workerEnv = getCloudflareContext().env as unknown as Record<string, unknown>;
+  } catch {
+    workerEnv = null; // not running inside the Cloudflare request context (e.g. plain next start)
+  }
+
+  const inWorker = (key: string) => (workerEnv ? typeof workerEnv[key] === "string" && Boolean(workerEnv[key]) : null);
+
+  console.log("[checkout][CONFIG]", {
+    supabaseUrl: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL),
+    serviceRole: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+    mercadoPagoToken: Boolean(process.env.MERCADO_PAGO_ACCESS_TOKEN),
+    appUrl: process.env.NEXT_PUBLIC_APP_URL || null,
+  });
+  console.log("[checkout][CONFIG] cloudflare bindings", {
+    contextAvailable: workerEnv !== null,
+    supabaseUrl: inWorker("NEXT_PUBLIC_SUPABASE_URL"),
+    serviceRole: inWorker("SUPABASE_SERVICE_ROLE_KEY"),
+    mercadoPagoToken: inWorker("MERCADO_PAGO_ACCESS_TOKEN"),
+  });
 }
 
 const describeError = (error: unknown) =>
@@ -59,10 +91,6 @@ function splitTotal(total: number, count: number) {
 
 export async function createCheckout(input: { email: unknown; photoIds: unknown }) {
   console.log("[checkout] START");
-  console.log("MP token configured:", Boolean(process.env.MERCADO_PAGO_ACCESS_TOKEN));
-  console.log("Service role configured:", Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY));
-  console.log("Supabase URL configured:", Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL));
-  console.log("APP URL:", process.env.NEXT_PUBLIC_APP_URL);
 
   const email = normalizeEmail(input.email);
   if (!isValidEmail(email)) {
@@ -80,12 +108,21 @@ export async function createCheckout(input: { email: unknown; photoIds: unknown 
     throw new PurchaseFlowError("La selección de fotos no es válida.");
   }
 
+  // CONFIG: runtime configuration needed by the following stages.
+  logConfigPresence();
+
+  if (!process.env.MERCADO_PAGO_ACCESS_TOKEN?.trim()) {
+    console.error("[checkout] CONFIG ERROR: CONFIG_MISSING_MP_TOKEN");
+    throw new CheckoutStageError("CONFIG", "CONFIG_MISSING_MP_TOKEN", "MISSING_MP_TOKEN");
+  }
+
   let supabase: ReturnType<typeof getSupabaseAdmin>;
   try {
     supabase = getSupabaseAdmin();
   } catch (error) {
-    console.error("[checkout] CONFIG ERROR:", describeError(error));
-    throw new CheckoutStageError("CONFIG", describeError(error));
+    const code = error instanceof SupabaseAdminConfigError ? error.code : "UNKNOWN_CONFIG_ERROR";
+    console.error("[checkout] CONFIG ERROR:", code);
+    throw new CheckoutStageError("CONFIG", `CONFIG_${code}`, code);
   }
 
   // ETAPA 1: fotos. Titles and existence come from the database, never from the browser.

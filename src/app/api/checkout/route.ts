@@ -26,6 +26,7 @@ export async function POST(request: Request) {
         message: "No se pudo iniciar el pago.",
         // Stage name is not sensitive and identifies the failing step in production.
         stage: error instanceof CheckoutStageError ? error.stage : "UNKNOWN",
+        code: error instanceof CheckoutStageError ? error.code : undefined,
         error:
           process.env.NODE_ENV !== "production"
             ? error instanceof Error
