@@ -18,7 +18,7 @@ export default function GalleryPage() {
   };
 
   const [selected, setSelected] = useState<string[]>([]);
-  const [buyerEmail, setBuyerEmail] = useState("juan.perez@gmail.com");
+  const [buyerEmail, setBuyerEmail] = useState("");
   const [photoData, setPhotoData] = useState<GalleryPhoto[]>([]);
   const [match, setMatch] = useState<{ slug: string; tag?: string; title: string; subtitle: string; venue: string; date: string; photoCount: number } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -389,7 +389,7 @@ export default function GalleryPage() {
                   type="email"
                   value={buyerEmail}
                   onChange={(event) => setBuyerEmail(event.target.value)}
-                  placeholder="tu@email.com"
+                  placeholder="nombre@correo.com"
                   className="field-input w-full"
                 />
               </label>

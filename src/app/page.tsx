@@ -12,6 +12,74 @@ const defaultHomePageData = {
   ],
 } as HomePageData;
 
+const stepIconProps = {
+  width: 20,
+  height: 20,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.5,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  "aria-hidden": true,
+} as const;
+
+// Dividers per step: stacked on mobile, 2x2 on tablet (sm), single row on desktop (lg).
+const purchaseSteps = [
+  {
+    number: "01",
+    title: "Elegí tu partido",
+    text: "Entrá a la galería del encuentro que querés ver.",
+    dividerClass: "",
+    icon: (
+      <svg {...stepIconProps}>
+        <rect x="3" y="5" width="18" height="14" rx="1" />
+        <path d="M12 5v14" />
+        <circle cx="12" cy="12" r="2.5" />
+      </svg>
+    ),
+  },
+  {
+    number: "02",
+    title: "Seleccioná tus fotos",
+    text: "Marcá una o varias fotos. Cuantas más elegís, mejor es el precio.",
+    dividerClass: "border-t sm:border-t-0 sm:border-l",
+    icon: (
+      <svg {...stepIconProps}>
+        <rect x="3" y="3" width="8" height="8" rx="1" />
+        <rect x="13" y="3" width="8" height="8" rx="1" />
+        <rect x="3" y="13" width="8" height="8" rx="1" />
+        <path d="m14.5 17 2 2 3.5-4" />
+      </svg>
+    ),
+  },
+  {
+    number: "03",
+    title: "Pagá con Mercado Pago",
+    text: "Ingresá tu email y completá el pago de forma segura.",
+    dividerClass: "border-t lg:border-t-0 lg:border-l",
+    icon: (
+      <svg {...stepIconProps}>
+        <rect x="3" y="11" width="18" height="10" rx="1" />
+        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+      </svg>
+    ),
+  },
+  {
+    number: "04",
+    title: "Descargá en alta calidad",
+    text: "Una vez aprobado el pago, tus originales quedan disponibles en “Mis Fotos”.",
+    dividerClass: "border-t sm:border-l lg:border-t-0",
+    icon: (
+      <svg {...stepIconProps}>
+        <path d="M12 3v12" />
+        <path d="m7 10 5 5 5-5" />
+        <path d="M5 21h14" />
+      </svg>
+    ),
+  },
+];
+
 export default function Home() {
   const [data, setData] = useState<HomePageData>(defaultHomePageData);
   const [contactStatus, setContactStatus] = useState<string | null>(null);
@@ -152,10 +220,28 @@ export default function Home() {
                 ))}
               </div>
             ) : (
-              <div className="rounded-[4px] border border-dashed border-white/15 bg-[#111820]/60 p-8 text-center text-[#8A9A93] sm:p-12">
-                <div className="mono text-[11px] uppercase tracking-[0.2em] text-[#FFC94A]">Próximamente</div>
-                <h3 className="mt-4 text-[22px] text-[#F4F1E8]">La experiencia de compra se cargará aquí.</h3>
-              </div>
+              <ol className="grid border-y border-white/10 sm:grid-cols-2 lg:grid-cols-4">
+                {purchaseSteps.map((step) => (
+                  <li
+                    key={step.number}
+                    className={`group border-white/10 px-1 py-6 transition-colors duration-300 hover:bg-white/[0.02] sm:px-6 sm:py-7 lg:py-8 ${step.dividerClass}`}
+                  >
+                    <div className="mb-4 flex items-center justify-between">
+                      <span className="mono text-[clamp(34px,4vw,44px)] font-semibold leading-none text-[#FFC94A]/90 transition-colors duration-300 group-hover:text-[#FFC94A]">
+                        {step.number}
+                      </span>
+                      <span className="text-[#8A9A93] transition-colors duration-300 group-hover:text-[#FFC94A]">
+                        {step.icon}
+                      </span>
+                    </div>
+                    <span className="mb-4 block h-px w-8 bg-[#FFC94A]/60" />
+                    <h3 className="mono mb-2 text-[12.5px] font-semibold uppercase tracking-[0.12em] text-[#F4F1E8] sm:text-[13px]">
+                      {step.title}
+                    </h3>
+                    <p className="text-[13px] leading-[1.6] text-[#8A9A93] sm:text-[14px]">{step.text}</p>
+                  </li>
+                ))}
+              </ol>
             )}
           </div>
         </section>
