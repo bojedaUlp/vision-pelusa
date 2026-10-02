@@ -116,6 +116,8 @@ export default function Home() {
   };
 
   const { navItems, steps, galleryCards, stats, contactRows } = data;
+  // Hero photo: cover of the most recent gallery, already loaded for "Galerías recientes".
+  const heroImageUrl = galleryCards.find((card) => card.imageUrl)?.imageUrl;
 
   const navHrefByItem: Record<string, string> = {
     Inicio: "/",
@@ -132,22 +134,28 @@ export default function Home() {
         <div className="section-shell flex items-center justify-between gap-3 py-4">
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <img src="/logo-vision-pelusa.svg" alt="Visión Pelusa" className="logo-mark" />
-            <span className="truncate text-[12px] font-semibold tracking-[0.08em] text-[#F4F1E8] sm:text-[14px]">Visión Pelusa</span>
+            <span className="hidden truncate whitespace-nowrap text-[12px] font-semibold tracking-[0.08em] text-[#F4F1E8] sm:block sm:text-[14px] md:max-lg:hidden">Visión Pelusa</span>
           </div>
 
-          <nav className="hidden items-center gap-8 text-sm font-medium text-[#8A9A93] md:flex">
+          <nav className="hidden items-center gap-4 whitespace-nowrap text-[13px] font-medium text-[#8A9A93] md:flex lg:gap-8 lg:text-sm">
             {navItems.map((item) => (
               <a key={item} href={navHrefByItem[item] ?? "/"} className="transition-colors hover:text-[#F4F1E8]">
                 {item}
               </a>
             ))}
+            <a href="/compras" className="transition-colors hover:text-[#F4F1E8]">
+              Mis fotos
+            </a>
           </nav>
 
-          <div className="flex items-center gap-2 sm:gap-3">
-            <a href="/admin" className="inline-flex items-center justify-center rounded-sm border border-white/10 px-2.5 py-2 text-[9px] font-semibold uppercase tracking-[0.06em] text-[#F4F1E8] transition-colors hover:border-[#FFC94A]/60 hover:text-[#FFC94A] sm:px-4 sm:py-2.5 sm:text-[11px]">
+          <div className="flex shrink-0 items-center gap-2 whitespace-nowrap sm:gap-3">
+            <a href="/compras" className="px-1 py-2 text-[10px] font-medium uppercase tracking-[0.06em] text-[#8A9A93] transition-colors hover:text-[#F4F1E8] sm:text-[12px] md:hidden">
+              Mis fotos
+            </a>
+            <a href="/admin" className="inline-flex items-center justify-center rounded-sm border border-white/10 px-2.5 py-2 text-[9px] font-semibold uppercase tracking-[0.06em] text-[#F4F1E8] transition-colors hover:border-[#FFC94A]/60 hover:text-[#FFC94A] sm:px-4 sm:py-2.5 sm:text-[11px] md:max-lg:px-3 md:max-lg:text-[10px]">
               Panel admin
             </a>
-            <a href="/compras" className="inline-flex items-center justify-center rounded-sm bg-[#FFC94A] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14] transition-transform hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(255,201,74,0.25)] sm:px-5 sm:py-3 sm:text-[13px]">
+            <a href="/#galerias" className="inline-flex items-center justify-center rounded-sm bg-[#FFC94A] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14] transition-transform hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(255,201,74,0.25)] sm:px-5 sm:py-3 sm:text-[13px] md:max-lg:px-4 md:max-lg:text-[12px]">
               Comprar fotos
             </a>
           </div>
@@ -155,7 +163,7 @@ export default function Home() {
       </header>
 
       <main>
-        <section className="hero-glow relative overflow-hidden">
+        <section className="hero-glow group relative overflow-hidden">
           <div className="hero-orb hero-orb-1" />
           <div className="hero-orb hero-orb-2" />
           <div className="absolute inset-y-0 left-[8%] w-px bg-gradient-to-b from-[#FFC94A]/30 via-[#FFC94A]/10 to-transparent blur-sm" style={{ transform: "rotate(12deg)" }} />
@@ -164,26 +172,39 @@ export default function Home() {
           <div className="absolute inset-y-0 right-[26%] w-px bg-gradient-to-b from-[#FFC94A]/20 via-[#FFC94A]/5 to-transparent blur-sm" style={{ transform: "rotate(-7deg)" }} />
           <div className="absolute bottom-0 left-0 right-0 h-[38vh] bg-[repeating-linear-gradient(90deg,rgba(255,255,255,0.025)_0_60px,rgba(255,255,255,0.05)_60px_120px)] [mask-image:linear-gradient(180deg,transparent,black_70%)]" />
 
-          <div className="section-shell relative z-10 flex min-h-[78vh] items-center py-16 sm:py-20 md:py-24">
+          {heroImageUrl ? (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 opacity-[0.14] [mask-image:linear-gradient(to_bottom,#000_35%,transparent)] md:left-auto md:w-[52%] md:opacity-40 md:[mask-composite:intersect] md:[mask-image:linear-gradient(to_right,transparent_10%,#000_70%),linear-gradient(to_bottom,#000_55%,transparent)] lg:w-[52%] lg:opacity-60"
+            >
+              <img
+                src={heroImageUrl}
+                alt=""
+                className="h-full w-full object-cover object-center transition-transform duration-[1600ms] ease-out group-hover:scale-[1.03]"
+              />
+            </div>
+          ) : null}
+
+          <div className="section-shell relative z-10 flex min-h-[68vh] items-center py-14 sm:py-16 md:py-16">
             <div className="w-full hero-float">
               <div className="hero-badge mb-4 flex items-center gap-3 mono text-[10px] uppercase tracking-[0.18em] text-[#FFC94A] sm:mb-6 sm:text-[12px]">
                 <span className="block h-px w-6 bg-[#FFC94A] sm:w-7" />
                 Fotografía oficial
               </div>
 
-              <h1 className="hero-title max-w-[820px] text-[clamp(38px,9vw,92px)] font-semibold leading-[0.96] text-[#F4F1E8]">
+              <h1 className="hero-title max-w-[820px] [text-shadow:0_2px_24px_rgba(11,15,20,0.55)] text-[clamp(38px,9vw,92px)] font-semibold leading-[0.96] text-[#F4F1E8]">
                 La emoción del partido,
                 <span className="block text-[#FFC94A]">en cada cuadro.</span>
               </h1>
 
               <p className="hero-copy mt-5 max-w-[480px] text-[14px] leading-6 text-[#8A9A93] sm:mt-7 sm:text-[17px]">
-                Galerías de fotos de la Liga Sanluiseña para hinchas, familias y jugadores que quieren volver a vivir cada jugada.
+                Encontrá tu partido, elegí tus fotos y descargalas en alta calidad.
               </p>
 
               <div className="hero-actions mt-8 inline-block w-full max-w-[420px] p-[6px] sm:mt-10 sm:w-auto">
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-                  <a href="/galeria/fecha-14" className="inline-flex items-center justify-center rounded-sm bg-[#FFC94A] px-5 py-3 text-[12px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14] transition-transform hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(255,201,74,0.25)] sm:px-6 sm:text-[13px]">
-                    Ver últimas galerías
+                  <a href="#galerias" className="inline-flex items-center justify-center rounded-sm bg-[#FFC94A] px-5 py-3 text-[12px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14] transition-transform hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(255,201,74,0.25)] sm:px-6 sm:text-[13px]">
+                    Buscar mi partido
                   </a>
                   <a href="#como-funciona" className="inline-flex items-center justify-center rounded-sm border border-white/15 bg-transparent px-5 py-3 text-[12px] font-semibold uppercase tracking-[0.04em] text-[#F4F1E8] transition-colors hover:border-[#F4F1E8] sm:px-6 sm:text-[13px]">
                     Cómo funciona
@@ -194,7 +215,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section id="como-funciona" className="py-16 sm:py-20 md:py-[110px]">
+        <section id="como-funciona" className="pt-12 pb-16 sm:pt-16 sm:pb-20 md:pt-[84px] md:pb-[110px]">
           <div className="section-shell">
             <div className="mb-8 max-w-[560px] sm:mb-14">
               <div className="mb-4 flex items-center gap-3 mono text-[10px] uppercase tracking-[0.22em] text-[#FFC94A] sm:text-[12px]">
