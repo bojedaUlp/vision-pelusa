@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getSupabaseAdmin } from "./supabase-admin";
+import { getPriceForCount } from "./mock-data";
 import {
   createMercadoPagoPreference,
   getMercadoPagoPayment,
@@ -39,7 +40,30 @@ function fail(context: string, error: unknown): never {
 /* Checkout                                                                   */
 /* -------------------------------------------------------------------------- */
 
+export class CheckoutStageError extends Error {
+  constructor(public readonly stage: "CONFIG" | "PHOTOS" | "PURCHASE" | "PURCHASE_ITEMS" | "MERCADO_PAGO" | "PREFERENCE_UPDATE", message: string) {
+    super(`[${stage}] ${message}`);
+  }
+}
+
+const describeError = (error: unknown) =>
+  error instanceof Error ? error.message : typeof error === "object" && error ? JSON.stringify(error) : String(error);
+
+// Same tiered table the gallery shows (getPriceForCount): 2 photos = $2.900.
+// Spread the total over the items in whole pesos so Mercado Pago receives exactly that total.
+function splitTotal(total: number, count: number) {
+  const base = Math.floor(total / count);
+  const remainder = total - base * count;
+  return Array.from({ length: count }, (_, index) => base + (index < remainder ? 1 : 0));
+}
+
 export async function createCheckout(input: { email: unknown; photoIds: unknown }) {
+  console.log("[checkout] START");
+  console.log("MP token configured:", Boolean(process.env.MERCADO_PAGO_ACCESS_TOKEN));
+  console.log("Service role configured:", Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY));
+  console.log("Supabase URL configured:", Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL));
+  console.log("APP URL:", process.env.NEXT_PUBLIC_APP_URL);
+
   const email = normalizeEmail(input.email);
   if (!isValidEmail(email)) {
     throw new PurchaseFlowError("Ingresá un email válido para confirmar la compra.");
@@ -47,6 +71,7 @@ export async function createCheckout(input: { email: unknown; photoIds: unknown 
 
   const rawIds = Array.isArray(input.photoIds) ? input.photoIds : [];
   const photoIds = Array.from(new Set(rawIds.map((id) => String(id ?? "").trim().toLowerCase())));
+  console.log("[checkout] photo ids:", photoIds);
 
   if (photoIds.length === 0) {
     throw new PurchaseFlowError("Seleccioná al menos una foto.");
@@ -55,56 +80,85 @@ export async function createCheckout(input: { email: unknown; photoIds: unknown 
     throw new PurchaseFlowError("La selección de fotos no es válida.");
   }
 
-  const supabase = getSupabaseAdmin();
+  let supabase: ReturnType<typeof getSupabaseAdmin>;
+  try {
+    supabase = getSupabaseAdmin();
+  } catch (error) {
+    console.error("[checkout] CONFIG ERROR:", describeError(error));
+    throw new CheckoutStageError("CONFIG", describeError(error));
+  }
 
-  // Prices and titles come from the database, never from the browser.
+  // ETAPA 1: fotos. Titles and existence come from the database, never from the browser.
   const { data: photos, error: photosError } = await supabase
     .from("photos")
-    .select("id, title, price, is_published")
+    .select("id, title, is_published")
     .in("id", photoIds);
 
-  if (photosError) fail("photos lookup failed", photosError);
+  if (photosError) {
+    console.error("[checkout] PHOTOS ERROR:", photosError);
+    throw new CheckoutStageError("PHOTOS", `Photos lookup failed: ${photosError.message}`);
+  }
 
-  const photoRows = (photos ?? []) as Array<{ id: string; title: string; price: number; is_published: boolean }>;
+  const photoRows = (photos ?? []) as Array<{ id: string; title: string; is_published: boolean }>;
   if (photoRows.length !== photoIds.length || photoRows.some((photo) => !photo.is_published)) {
+    console.error("[checkout] PHOTOS ERROR: requested", photoIds.length, "found", photoRows.length);
     throw new PurchaseFlowError("Alguna de las fotos seleccionadas ya no está disponible.");
   }
 
-  const total = photoRows.reduce((sum, photo) => sum + Number(photo.price), 0);
+  const total = getPriceForCount(photoRows.length);
+  const unitPrices = splitTotal(total, photoRows.length);
+  console.log("[checkout] total:", total, "unit prices:", unitPrices);
 
+  // ETAPA 2: purchase pending.
+  console.log("[checkout] creating purchase");
   const { data: purchase, error: purchaseError } = await supabase
     .from("purchases")
     .insert({ buyer_email: email, status: "pending", total_amount: total })
     .select("id")
     .single();
 
-  if (purchaseError || !purchase) fail("pending purchase insert failed", purchaseError);
-
-  const purchaseId = String(purchase.id);
-
-  const { error: itemsError } = await supabase.from("purchase_items").insert(
-    photoRows.map((photo) => ({
-      purchase_id: purchaseId,
-      photo_id: photo.id,
-      quantity: 1,
-      unit_price: Number(photo.price),
-    })),
-  );
-
-  if (itemsError) {
-    await supabase.from("purchases").delete().eq("id", purchaseId);
-    fail("purchase_items insert failed", itemsError);
+  if (purchaseError || !purchase) {
+    console.error("[checkout] PURCHASE INSERT ERROR:", purchaseError);
+    throw new CheckoutStageError("PURCHASE", `Purchase insert failed: ${purchaseError?.message ?? "no row returned"}`);
   }
 
+  const purchaseId = String(purchase.id);
+  console.log("[checkout] purchase created:", purchaseId);
+
+  // ETAPA 3: one purchase_items row per photo, with the real photos.id UUID.
+  const itemRows = photoRows.map((photo, index) => ({
+    purchase_id: purchaseId,
+    photo_id: photo.id,
+    quantity: 1,
+    unit_price: unitPrices[index],
+  }));
+
+  const { data: insertedItems, error: itemsError } = await supabase
+    .from("purchase_items")
+    .insert(itemRows)
+    .select("id");
+
+  if (itemsError || (insertedItems ?? []).length !== itemRows.length) {
+    console.error("[checkout] PURCHASE ITEMS ERROR:", itemsError ?? `inserted ${insertedItems?.length ?? 0} of ${itemRows.length}`);
+    await supabase.from("purchases").delete().eq("id", purchaseId);
+    throw new CheckoutStageError(
+      "PURCHASE_ITEMS",
+      `Purchase items insert failed: ${itemsError?.message ?? `inserted ${insertedItems?.length ?? 0} of ${itemRows.length}`}`,
+    );
+  }
+  console.log("[checkout] purchase_items created:", insertedItems?.length);
+
+  // ETAPA 4: Mercado Pago preference.
   const appUrl = getAppUrl();
+  let preference: Awaited<ReturnType<typeof createMercadoPagoPreference>>;
 
   try {
-    const preference = await createMercadoPagoPreference({
-      items: photoRows.map((photo) => ({
+    preference = await createMercadoPagoPreference({
+      items: photoRows.map((photo, index) => ({
         id: photo.id,
         title: photo.title || "Foto Visión Pelusa",
         quantity: 1,
-        unit_price: Number(photo.price),
+        unit_price: unitPrices[index],
       })),
       payerEmail: email,
       externalReference: purchaseId,
@@ -113,23 +167,26 @@ export async function createCheckout(input: { email: unknown; photoIds: unknown 
       // Mercado Pago only accepts public https notification URLs.
       notificationUrl: appUrl.startsWith("https://") ? `${appUrl}/api/payments/webhook` : undefined,
     });
-
-    const { error: prefError } = await supabase
-      .from("purchases")
-      .update({ mercado_pago_preference_id: preference.preferenceId })
-      .eq("id", purchaseId);
-
-    if (prefError) fail("preference id update failed", prefError);
-
-    if (!preference.checkoutUrl) {
-      throw new Error("Mercado Pago no devolvió init_point.");
-    }
-
-    return { purchaseId, total, checkoutUrl: preference.checkoutUrl };
   } catch (error) {
+    console.error("[checkout] MERCADO PAGO ERROR:", describeError(error));
     await supabase.from("purchases").update({ status: "failed" }).eq("id", purchaseId);
-    throw error;
+    throw new CheckoutStageError("MERCADO_PAGO", describeError(error));
   }
+  console.log("[checkout] preference created:", preference.preferenceId);
+
+  const { error: prefError } = await supabase
+    .from("purchases")
+    .update({ mercado_pago_preference_id: preference.preferenceId })
+    .eq("id", purchaseId);
+
+  if (prefError) {
+    console.error("[checkout] PREFERENCE UPDATE ERROR:", prefError);
+    await supabase.from("purchases").update({ status: "failed" }).eq("id", purchaseId);
+    throw new CheckoutStageError("PREFERENCE_UPDATE", `Preference id update failed: ${prefError.message}`);
+  }
+
+  console.log("[checkout] DONE", { purchaseId, total });
+  return { purchaseId, total, checkoutUrl: preference.checkoutUrl };
 }
 
 /* -------------------------------------------------------------------------- */

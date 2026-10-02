@@ -81,13 +81,17 @@ export async function createMercadoPagoPreference(input: MercadoPagoPreferenceIn
   });
 
   if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(`Mercado Pago POST /checkout/preferences falló (${response.status}): ${detail}`);
+    const text = await response.text().catch(() => "");
+    console.error("[MercadoPago] preference failed", response.status, text);
+    throw new Error(`Mercado Pago POST /checkout/preferences falló (${response.status}): ${text}`);
   }
 
   const data = (await response.json()) as { id: string; init_point?: string; sandbox_init_point?: string };
-  return {
-    preferenceId: data.id,
-    checkoutUrl: data.init_point ?? data.sandbox_init_point ?? "",
-  };
+  const checkoutUrl = data.init_point ?? data.sandbox_init_point ?? "";
+  if (!checkoutUrl) {
+    console.error("[MercadoPago] preference without init_point", data.id);
+    throw new Error(`Mercado Pago no devolvió init_point para la preferencia ${data.id}`);
+  }
+
+  return { preferenceId: data.id, checkoutUrl };
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createCheckout, PurchaseFlowError } from "@/lib/purchases-server";
+import { CheckoutStageError, createCheckout, PurchaseFlowError } from "@/lib/purchases-server";
 
 export async function POST(request: Request) {
   try {
@@ -18,9 +18,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, message: error.message }, { status: error.status });
     }
 
-    console.error("checkout route error", error);
+    console.error("[checkout] FAILED:", error instanceof Error ? error.message : error);
+
     return NextResponse.json(
-      { ok: false, message: "No se pudo iniciar el pago. Verificá la configuración de Mercado Pago." },
+      {
+        ok: false,
+        message: "No se pudo iniciar el pago.",
+        // Stage name is not sensitive and identifies the failing step in production.
+        stage: error instanceof CheckoutStageError ? error.stage : "UNKNOWN",
+        error:
+          process.env.NODE_ENV !== "production"
+            ? error instanceof Error
+              ? error.message
+              : String(error)
+            : undefined,
+      },
       { status: 500 },
     );
   }
