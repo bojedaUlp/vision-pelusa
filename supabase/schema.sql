@@ -83,7 +83,9 @@ create table if not exists public.purchases (
   status text not null default 'pending' check (status in ('pending', 'paid', 'failed', 'expired')),
   total_amount integer not null default 0,
   created_at timestamptz not null default now(),
-  paid_at timestamptz
+  paid_at timestamptz,
+  mercado_pago_payment_id text unique,
+  mercado_pago_preference_id text
 );
 
 create table if not exists public.purchase_items (
@@ -99,7 +101,7 @@ create table if not exists public.download_access (
   id uuid primary key default gen_random_uuid(),
   purchase_id uuid not null references public.purchases(id) on delete cascade,
   photo_id uuid references public.photos(id) on delete set null,
-  download_url text not null,
+  download_url text,
   expires_at timestamptz,
   created_at timestamptz not null default now()
 );
@@ -114,14 +116,29 @@ alter table public.download_access enable row level security;
 create policy if not exists "matches_select_public" on public.matches for select using (true);
 create policy if not exists "photos_select_public" on public.photos for select using (true);
 create policy if not exists "price_tiers_select_public" on public.price_tiers for select using (true);
-create policy if not exists "purchases_select_public" on public.purchases for select using (true);
-create policy if not exists "purchase_items_select_public" on public.purchase_items for select using (true);
-create policy if not exists "download_access_select_public" on public.download_access for select using (true);
+-- Purchase data: no public access. Writes use the service role; reads are admin-only
+-- (buyers go through the API routes). See migrations/20261002_purchase_flow.sql.
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $
+  select exists (select 1 from public.profiles where id = auth.uid() and is_admin = true);
+$;
+
+create policy "purchases_select_admin" on public.purchases for select using (public.is_admin());
+create policy "purchase_items_select_admin" on public.purchase_items for select using (public.is_admin());
+create policy "download_access_select_admin" on public.download_access for select using (public.is_admin());
 
 create index if not exists matches_slug_idx on public.matches(slug);
 create index if not exists photos_match_id_idx on public.photos(match_id);
 create index if not exists purchases_buyer_email_idx on public.purchases(buyer_email);
 create index if not exists purchase_items_purchase_id_idx on public.purchase_items(purchase_id);
+create unique index if not exists purchase_items_purchase_photo_key on public.purchase_items(purchase_id, photo_id);
+create unique index if not exists download_access_purchase_photo_key on public.download_access(purchase_id, photo_id);
+create index if not exists purchases_buyer_email_lower_idx on public.purchases(lower(buyer_email));
 
 create or replace function public.update_updated_at()
 returns trigger as $$

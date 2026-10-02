@@ -9,7 +9,7 @@ export default function GalleryPage() {
   const params = useParams<{ slug: string }>();
   const resolvedSlug = typeof params?.slug === "string" ? params.slug : null;
   type GalleryPhoto = {
-    id: number;
+    id: string;
     number: number;
     title: string;
     price: number;
@@ -17,7 +17,7 @@ export default function GalleryPage() {
     watermarkUrl?: string;
   };
 
-  const [selected, setSelected] = useState<number[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
   const [buyerEmail, setBuyerEmail] = useState("juan.perez@gmail.com");
   const [photoData, setPhotoData] = useState<GalleryPhoto[]>([]);
   const [match, setMatch] = useState<{ slug: string; tag?: string; title: string; subtitle: string; venue: string; date: string; photoCount: number } | null>(null);
@@ -32,17 +32,14 @@ export default function GalleryPage() {
     const unique = new Map<string, GalleryPhoto>();
 
     photoData.forEach((photo, index) => {
-      const rawId = Number(photo.id ?? photo.number ?? index + 1);
-      const rawNumber = Number(photo.number ?? photo.id ?? index + 1);
-      const id = Number.isFinite(rawId) ? rawId : index + 1;
-      const number = Number.isFinite(rawNumber) ? rawNumber : index + 1;
+      const id = String(photo.id);
+      const number = Number.isFinite(Number(photo.number)) ? Number(photo.number) : index + 1;
       const price = Number.isFinite(Number(photo.price)) ? Number(photo.price) : 1500;
       const imageUrl = typeof photo.imageUrl === "string" ? photo.imageUrl : "";
       const watermarkUrl = typeof photo.watermarkUrl === "string" ? photo.watermarkUrl : imageUrl;
-      const key = `${id}-${number}`;
 
-      if (!unique.has(key)) {
-        unique.set(key, {
+      if (!unique.has(id)) {
+        unique.set(id, {
           ...photo,
           id,
           number,
@@ -53,10 +50,7 @@ export default function GalleryPage() {
       }
     });
 
-    const photos = Array.from(unique.values());
-    console.log("photos before render:", photos);
-    console.log("photos before render count:", photos?.length);
-    return photos;
+    return Array.from(unique.values());
   }, [photoData]);
 
   useEffect(() => {
@@ -101,7 +95,7 @@ export default function GalleryPage() {
   const safeSelectedTotal = Number.isFinite(selectedTotal) ? selectedTotal : 0;
   const safeSelectedCount = Number.isFinite(selectedCount) ? selectedCount : 0;
 
-  const togglePhoto = (id: number) => {
+  const togglePhoto = (id: string) => {
     setSelected((current) =>
       current.includes(id)
         ? current.filter((item) => item !== id)
@@ -157,23 +151,8 @@ export default function GalleryPage() {
         /^https?:\/\//i.test(payload.checkoutUrl) &&
         !payload.checkoutUrl.includes("pref_id=mock_")
       ) {
-        const redirectUrl = payload.checkoutUrl;
-
-        if (payload?.mock && payload?.paymentId) {
-          await fetch("/api/payments/webhook", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              email: trimmedEmail,
-              buyer_email: trimmedEmail,
-              title: `${match?.title ?? "Compra Pelusa"} · ${selectedPhotos.length} fotos`,
-              total: payload.total,
-              count: selectedPhotos.length,
-            }),
-          });
-        }
-
-        window.location.href = redirectUrl;
+        // The purchase is persisted only after the server verifies the payment with Mercado Pago.
+        window.location.href = payload.checkoutUrl;
         return;
       }
 

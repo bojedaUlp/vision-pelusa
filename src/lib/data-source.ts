@@ -60,20 +60,18 @@ const formatMatchCard = (match: any) => ({
 });
 
 const formatPhoto = (photo: any, index = 0): ProductPhoto => {
-  // photos.id is a uuid and there is no `number` column, so Number(...) is NaN here.
-  // Fall back to the position in the sort_order-ordered result so each photo stays distinct.
-  const position = index + 1;
-  const safeId = Number(photo.id ?? photo.number ?? position);
-  const safeNumber = Number(photo.number ?? photo.id ?? position);
+  // id is the real photos.id UUID (used for selection and checkout);
+  // number is only the visual position in the sort_order-ordered result.
+  const number = index + 1;
   const safePrice = Number(photo.price ?? 1500);
   const imageUrl = String(photo.image_url ?? photo.imageUrl ?? "") || "";
   const watermarkUrl = String(photo.watermark_url ?? photo.watermarkUrl ?? imageUrl) || imageUrl;
 
   return {
-    id: Number.isFinite(safeId) ? safeId : position,
-    title: photo.title ?? `Foto ${Number.isFinite(safeNumber) ? safeNumber : position}`,
+    id: String(photo.id),
+    title: photo.title ?? `Foto ${number}`,
     price: Number.isFinite(safePrice) ? safePrice : 1500,
-    number: Number.isFinite(safeNumber) ? safeNumber : position,
+    number,
     imageUrl: imageUrl || undefined,
     watermarkUrl: watermarkUrl || undefined,
     isPublished: photo.is_published ?? true,
@@ -297,10 +295,6 @@ export async function getPhotosByMatchSlug(slug: string): Promise<ProductPhoto[]
       .eq("match_id", match.id)
       .order("sort_order", { ascending: true });
 
-    console.log("matchId:", match.id);
-    console.log("photos from Supabase:", data);
-    console.log("photos count:", data?.length);
-
     if (error) {
       console.error("getPhotosByMatchSlug photos lookup failed", error);
       return [];
@@ -383,7 +377,8 @@ export async function getAdminData() {
         .in("status", ["paid"]),
       supabase
         .from("purchase_items")
-        .select("quantity, photo_id"),
+        .select("quantity, photo_id, purchases!inner(status)")
+        .eq("purchases.status", "paid"),
     ]);
 
     if (matchesResponse.error) {

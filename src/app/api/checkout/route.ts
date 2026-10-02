@@ -1,35 +1,27 @@
 import { NextResponse } from "next/server";
-import { buildCheckoutResponse } from "@/lib/checkout";
+import { createCheckout, PurchaseFlowError } from "@/lib/purchases-server";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const items = Array.isArray(body?.items) ? body.items : [];
-    const email = typeof body?.email === "string" ? body.email : "";
+    const body = await request.json().catch(() => null);
+    const items: unknown[] = Array.isArray(body?.items) ? body.items : [];
 
-    const response = await buildCheckoutResponse(items, email);
-    return NextResponse.json(response);
+    // Only the photo UUIDs are taken from the browser; prices and titles are read server-side.
+    const { purchaseId, total, checkoutUrl } = await createCheckout({
+      email: body?.email,
+      photoIds: items.map((item) => (item as { id?: unknown })?.id),
+    });
+
+    return NextResponse.json({ ok: true, purchaseId, total, checkoutUrl });
   } catch (error) {
+    if (error instanceof PurchaseFlowError) {
+      return NextResponse.json({ ok: false, message: error.message }, { status: error.status });
+    }
+
     console.error("checkout route error", error);
     return NextResponse.json(
-      {
-        ok: false,
-        mock: true,
-        total: 0,
-        items: [],
-        message: "No se pudo procesar el checkout.",
-      },
-      { status: 400 },
+      { ok: false, message: "No se pudo iniciar el pago. Verificá la configuración de Mercado Pago." },
+      { status: 500 },
     );
   }
-}
-
-export async function GET() {
-  return NextResponse.json({
-    ok: true,
-    mock: true,
-    total: 0,
-    items: [],
-    message: "El checkout está listo para recibir un POST.",
-  });
 }

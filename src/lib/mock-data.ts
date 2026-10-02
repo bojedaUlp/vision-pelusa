@@ -11,7 +11,7 @@ export type MatchSummary = {
 };
 
 export type ProductPhoto = {
-  id: number;
+  id: string;
   title: string;
   price: number;
   number: number;
@@ -136,7 +136,7 @@ export const matches: MatchSummary[] = [
 ];
 
 export const galleryPhotos: ProductPhoto[] = Array.from({ length: 12 }, (_, index) => ({
-  id: index + 1,
+  id: `mock-${index + 1}`,
   number: index + 1,
   title: `Foto ${index + 1}`,
   price: 1500,
