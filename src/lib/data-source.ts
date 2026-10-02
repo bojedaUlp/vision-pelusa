@@ -59,18 +59,21 @@ const formatMatchCard = (match: any) => ({
   imageUrl: match.cover_url ?? match.image_url ?? undefined,
 });
 
-const formatPhoto = (photo: any): ProductPhoto => {
-  const safeId = Number(photo.id ?? photo.number ?? 1);
-  const safeNumber = Number(photo.number ?? photo.id ?? 1);
+const formatPhoto = (photo: any, index = 0): ProductPhoto => {
+  // photos.id is a uuid and there is no `number` column, so Number(...) is NaN here.
+  // Fall back to the position in the sort_order-ordered result so each photo stays distinct.
+  const position = index + 1;
+  const safeId = Number(photo.id ?? photo.number ?? position);
+  const safeNumber = Number(photo.number ?? photo.id ?? position);
   const safePrice = Number(photo.price ?? 1500);
   const imageUrl = String(photo.image_url ?? photo.imageUrl ?? "") || "";
   const watermarkUrl = String(photo.watermark_url ?? photo.watermarkUrl ?? imageUrl) || imageUrl;
 
   return {
-    id: Number.isFinite(safeId) ? safeId : 1,
-    title: photo.title ?? `Foto ${safeNumber || 1}`,
+    id: Number.isFinite(safeId) ? safeId : position,
+    title: photo.title ?? `Foto ${Number.isFinite(safeNumber) ? safeNumber : position}`,
     price: Number.isFinite(safePrice) ? safePrice : 1500,
-    number: Number.isFinite(safeNumber) ? safeNumber : 1,
+    number: Number.isFinite(safeNumber) ? safeNumber : position,
     imageUrl: imageUrl || undefined,
     watermarkUrl: watermarkUrl || undefined,
     isPublished: photo.is_published ?? true,
@@ -294,9 +297,9 @@ export async function getPhotosByMatchSlug(slug: string): Promise<ProductPhoto[]
       .eq("match_id", match.id)
       .order("sort_order", { ascending: true });
 
-    console.log("Gallery ID:", match.id);
-    console.log("Fotos recibidas:", data ?? []);
-    console.log("Cantidad:", data?.length ?? 0);
+    console.log("matchId:", match.id);
+    console.log("photos from Supabase:", data);
+    console.log("photos count:", data?.length);
 
     if (error) {
       console.error("getPhotosByMatchSlug photos lookup failed", error);
@@ -307,7 +310,7 @@ export async function getPhotosByMatchSlug(slug: string): Promise<ProductPhoto[]
       return [];
     }
 
-    return data.map((photo) => formatPhoto(photo));
+    return data.map((photo, index) => formatPhoto(photo, index));
   } catch (error) {
     console.error("getPhotosByMatchSlug unexpected error", error);
     return fallbackMatch ? fallbackPhotos : [];

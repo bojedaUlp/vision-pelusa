@@ -53,7 +53,10 @@ export default function GalleryPage() {
       }
     });
 
-    return Array.from(unique.values());
+    const photos = Array.from(unique.values());
+    console.log("photos before render:", photos);
+    console.log("photos before render count:", photos?.length);
+    return photos;
   }, [photoData]);
 
   useEffect(() => {
