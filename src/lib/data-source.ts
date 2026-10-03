@@ -71,7 +71,9 @@ const withEmbeddedCover = (match: any) => {
   const previewUrl = protectedImageUrl(firstPhoto?.watermark_url);
   return {
     ...formatMatchCard({ ...match, cover_url: thumbnailUrl ?? previewUrl ?? protectedImageUrl(match.cover_url) ?? "" }),
-    previewUrl: previewUrl ?? thumbnailUrl,
+    // Home hero: only the dedicated hero variant chosen in the admin. No fallback to the
+    // gallery preview (tiled watermark) and never to the original.
+    heroUrl: protectedImageUrl(match.hero_url),
   };
 };
 

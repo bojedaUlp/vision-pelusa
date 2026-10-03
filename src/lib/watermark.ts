@@ -10,6 +10,11 @@ export const THUMBNAIL_MAX_SIZE = 640;
 const PREVIEW_QUALITY = 0.82;
 const THUMBNAIL_QUALITY = 0.75;
 
+// HERO: one promotional image per gallery, chosen by the admin for the Home. No tiled pattern,
+// only a discreet corner mark. Never generated in bulk: every hero is a near-clean public image.
+export const HERO_MAX_SIZE = 1920;
+const HERO_QUALITY = 0.8;
+
 function drawWatermark(ctx: CanvasRenderingContext2D, width: number, height: number) {
   const shortSide = Math.min(width, height);
   const diagonal = Math.hypot(width, height);
@@ -60,7 +65,24 @@ function drawWatermark(ctx: CanvasRenderingContext2D, width: number, height: num
   ctx.restore();
 }
 
-async function renderVariant(bitmap: ImageBitmap, maxSize: number, quality: number): Promise<Blob> {
+function drawCornerMark(ctx: CanvasRenderingContext2D, width: number, height: number) {
+  const size = Math.max(12, Math.round(Math.min(width, height) * 0.03));
+  const margin = Math.round(size * 1.2);
+  ctx.save();
+  ctx.font = `800 ${size}px ${FONT_FAMILY}`;
+  ctx.textAlign = "right";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
+  ctx.fillText(WATERMARK_TEXT, width - margin, height - margin);
+  ctx.restore();
+}
+
+async function renderVariant(
+  bitmap: ImageBitmap,
+  maxSize: number,
+  quality: number,
+  draw: (ctx: CanvasRenderingContext2D, width: number, height: number) => void = drawWatermark,
+): Promise<Blob> {
   const scale = Math.min(1, maxSize / Math.max(bitmap.width, bitmap.height));
   const width = Math.max(1, Math.round(bitmap.width * scale));
   const height = Math.max(1, Math.round(bitmap.height * scale));
@@ -74,7 +96,7 @@ async function renderVariant(bitmap: ImageBitmap, maxSize: number, quality: numb
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(bitmap, 0, 0, width, height);
-  drawWatermark(ctx, width, height);
+  draw(ctx, width, height);
 
   return new Promise((resolve, reject) => {
     canvas.toBlob(
@@ -92,6 +114,16 @@ export async function createProtectedVariants(source: Blob): Promise<{ preview: 
     const preview = await renderVariant(bitmap, PREVIEW_MAX_SIZE, PREVIEW_QUALITY);
     const thumbnail = await renderVariant(bitmap, THUMBNAIL_MAX_SIZE, THUMBNAIL_QUALITY);
     return { preview, thumbnail };
+  } finally {
+    bitmap.close();
+  }
+}
+
+/** HERO (≤1920px, JPEG ~80%) with only a discreet corner mark. */
+export async function createHeroVariant(source: Blob): Promise<Blob> {
+  const bitmap = await createImageBitmap(source, { imageOrientation: "from-image" });
+  try {
+    return await renderVariant(bitmap, HERO_MAX_SIZE, HERO_QUALITY, drawCornerMark);
   } finally {
     bitmap.close();
   }

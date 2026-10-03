@@ -52,6 +52,7 @@ create table if not exists public.matches (
   venue text not null,
   played_at timestamptz not null,
   cover_url text,
+  hero_url text,
   status text not null default 'draft' check (status in ('draft', 'published', 'archived')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

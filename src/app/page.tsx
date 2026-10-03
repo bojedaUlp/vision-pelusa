@@ -130,8 +130,8 @@ export default function Home() {
 
   const { navItems, steps, galleryCards, stats, contactRows } = data;
   // Hero photo: cover of the most recent gallery, already loaded for "Galerías recientes".
-  const heroCard = galleryCards.find((card) => card.previewUrl || card.imageUrl);
-  const heroImageUrl = heroCard?.previewUrl ?? heroCard?.imageUrl;
+  // Most recent published gallery with a hero variant; none → hero without photo.
+  const heroImageUrl = galleryCards.find((card) => card.heroUrl)?.heroUrl;
 
   return (
     <div className="min-h-screen bg-[#0B0F14] text-[#F4F1E8]">

@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clearAdminSession, getCurrentAdminProfile, isAdminSessionActive, setAdminSession } from "@/lib/admin-auth";
 import { getAdminData } from "@/lib/data-source";
-import { ORIGINALS_BUCKET, PREVIEWS_BUCKET, storagePathInBucket } from "@/lib/protected-images";
+import { ORIGINALS_BUCKET, PREVIEWS_BUCKET, protectedImageUrl, storagePathInBucket } from "@/lib/protected-images";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
-import { createProtectedVariants } from "@/lib/watermark";
+import { createHeroVariant, createProtectedVariants } from "@/lib/watermark";
 
 type UploadItem = {
   name: string;
@@ -68,6 +68,12 @@ export default function AdminPage() {
   // Photos without a protected thumbnail (uploaded before the watermark pipeline). null = unknown.
   const [pendingPreviews, setPendingPreviews] = useState<number | null>(null);
   const [isGeneratingPreviews, setIsGeneratingPreviews] = useState(false);
+  // Home hero of the selected gallery: the admin picks one photo explicitly.
+  const [heroPhotos, setHeroPhotos] = useState<Array<{ id: string; title: string; thumbnail_url: string | null }>>([]);
+  const [heroPhotoId, setHeroPhotoId] = useState<string | null>(null);
+  const [currentHeroUrl, setCurrentHeroUrl] = useState<string | null>(null);
+  const [heroUnavailable, setHeroUnavailable] = useState(false);
+  const [isGeneratingHero, setIsGeneratingHero] = useState(false);
   const editRequestRef = useRef(0);
 
   // Stable (only state setters and module imports), so the mount effect runs once.
@@ -257,8 +263,16 @@ export default function AdminPage() {
     return Number.isFinite(digits) && digits > 0 ? digits : 1500;
   };
 
+  const resetHeroPicker = () => {
+    setHeroPhotos([]);
+    setHeroPhotoId(null);
+    setCurrentHeroUrl(null);
+    setHeroUnavailable(false);
+  };
+
   const handleNewGallery = () => {
     editRequestRef.current += 1;
+    resetHeroPicker();
     setSelectedGalleryId(null);
     setForm(emptyGalleryForm);
     setSelectedFiles([]);
@@ -269,6 +283,7 @@ export default function AdminPage() {
     const requestId = ++editRequestRef.current;
     // Clear the previous selection first so no stale UUID can receive uploads while loading.
     setSelectedGalleryId(null);
+    resetHeroPicker();
     setForm((prev) => ({ ...emptyGalleryForm, price: prev.price }));
     setSelectedFiles([]);
     setStatusMessage("Cargando galería...");
@@ -295,6 +310,96 @@ export default function AdminPage() {
       status: data.status === "published" ? "Publicada" : "Borrador",
     }));
     setStatusMessage(`Editando "${data.title}". Las fotos se subirán a esta galería.`);
+
+    // Hero picker data: the gallery's watermarked thumbnails and its current hero.
+    const supabase = getSupabaseClient();
+    const [photosResult, heroResult] = await Promise.all([
+      supabase
+        .from("photos")
+        .select("id, title, thumbnail_url")
+        .eq("match_id", galleryId)
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true })
+        .limit(500),
+      supabase.from("matches").select("hero_url").eq("id", galleryId).single(),
+    ]);
+
+    if (requestId !== editRequestRef.current) return;
+
+    setHeroPhotos((photosResult.data ?? []) as Array<{ id: string; title: string; thumbnail_url: string | null }>);
+    if (heroResult.error) {
+      // hero_url column missing → migration 20261004_gallery_hero.sql not applied yet.
+      setHeroUnavailable(true);
+    } else {
+      setCurrentHeroUrl(protectedImageUrl(heroResult.data?.hero_url) ?? null);
+    }
+  };
+
+  // HERO for the Home: generated from the original of the photo the admin picked, uploaded to
+  // "previews", saved in matches.hero_url. The previous hero file of this gallery is removed only
+  // after the new one is saved.
+  const handleGenerateHero = async () => {
+    const galleryId = selectedGalleryId;
+    const photoId = heroPhotoId;
+    if (!galleryId || !photoId) {
+      setStatusMessage("Elegí la foto que querés usar en la Home.");
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    const previews = supabase.storage.from(PREVIEWS_BUCKET);
+    setIsGeneratingHero(true);
+    setStatusMessage("Generando imagen para la Home...");
+    let newPath: string | null = null;
+
+    try {
+      const [{ data: photo, error: photoError }, { data: gallery, error: galleryError }] = await Promise.all([
+        supabase.from("photos").select("id, match_id, image_url").eq("id", photoId).eq("match_id", galleryId).single(),
+        supabase.from("matches").select("hero_url").eq("id", galleryId).single(),
+      ]);
+      if (photoError || !photo?.image_url) throw new Error(photoError?.message ?? "la foto no pertenece a esta galería");
+      if (galleryError) throw new Error(galleryError.message);
+      const previousHeroUrl: string | null = gallery?.hero_url ?? null;
+
+      // Original read with the admin session (bucket "photos" is private).
+      const originalPath = storagePathInBucket(photo.image_url, ORIGINALS_BUCKET);
+      if (!originalPath) throw new Error("la foto no tiene un original en el bucket privado");
+      const { data: original, error: downloadError } = await supabase.storage.from(ORIGINALS_BUCKET).download(originalPath);
+      if (downloadError || !original) throw new Error(downloadError?.message ?? "no se pudo leer el original");
+
+      const hero = await createHeroVariant(original);
+      const { data: uploaded, error: uploadError } = await previews.upload(`${galleryId}/hero-${Date.now()}.jpg`, hero, {
+        contentType: "image/jpeg",
+        cacheControl: "31536000",
+        upsert: false,
+      });
+      if (uploadError || !uploaded) throw new Error(uploadError?.message ?? "no se pudo subir la imagen");
+      newPath = uploaded.path;
+      const heroUrl = previews.getPublicUrl(uploaded.path).data.publicUrl;
+
+      const { data: updated, error: updateError } = await supabase
+        .from("matches")
+        .update({ hero_url: heroUrl })
+        .eq("id", galleryId)
+        .select("id");
+      if (updateError || !updated?.length) throw new Error(updateError?.message ?? "la base no permitió guardar el hero");
+      newPath = null; // saved: keep it
+
+      setCurrentHeroUrl(heroUrl);
+      let cleanupNote = "";
+      // Remove the previous hero only if it is this gallery's hero file in "previews".
+      const previousPath = previousHeroUrl ? storagePathInBucket(previousHeroUrl, PREVIEWS_BUCKET) : null;
+      if (previousPath && previousPath !== uploaded.path && previousPath.startsWith(`${galleryId}/hero-`)) {
+        const { error: removeError } = await previews.remove([previousPath]);
+        if (removeError) cleanupNote = ` (no se pudo borrar el hero anterior: ${removeError.message})`;
+      }
+      setStatusMessage(`Imagen para la Home actualizada${cleanupNote}.`);
+    } catch (error) {
+      if (newPath) await previews.remove([newPath]).catch(() => undefined);
+      setStatusMessage(`No se pudo generar la imagen para la Home: ${error instanceof Error ? error.message : "error desconocido"}`);
+    } finally {
+      setIsGeneratingHero(false);
+    }
   };
 
   const handleSaveGallery = async () => {
@@ -585,7 +690,7 @@ export default function AdminPage() {
             <h1 className="text-[28px] font-semibold text-[#F4F1E8]">Mis galerías</h1>
             <p className="mt-2 text-[13.5px] text-[#8A9A93]">Subí, organizá y publicá cada partido de la temporada.</p>
           </div>
-          <button type="button" onClick={handleNewGallery} disabled={isUploading || isSavingGallery} className="bg-[#FFC94A] px-5 py-3 text-[13px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14] disabled:cursor-not-allowed disabled:opacity-60">
+          <button type="button" onClick={handleNewGallery} disabled={isUploading || isSavingGallery || isGeneratingHero} className="bg-[#FFC94A] px-5 py-3 text-[13px] font-semibold uppercase tracking-[0.04em] text-[#0B0F14] disabled:cursor-not-allowed disabled:opacity-60">
             + Nuevo partido
           </button>
         </div>
@@ -663,6 +768,60 @@ export default function AdminPage() {
             >
               {isSavingGallery ? "Guardando..." : selectedGalleryId ? "Guardar cambios" : "Crear galería"}
             </button>
+
+            {selectedGalleryId ? (
+              <div className="mt-6 border-t border-white/10 pt-5">
+                <h3 className="text-[13px] font-semibold uppercase tracking-[0.08em] text-[#F4F1E8]">Imagen para la Home</h3>
+                {heroUnavailable ? (
+                  <p className="mt-2 text-[12px] text-[#fca5a5]">Aplicá la migración 20261004_gallery_hero.sql para usar esta opción.</p>
+                ) : (
+                  <>
+                    <p className="mt-2 text-[12px] text-[#8A9A93]">
+                      Elegí una foto promocional. Se publica a 1920 px con una marca discreta: no elijas una foto que quieras vender.
+                    </p>
+                    {currentHeroUrl ? (
+                      <div
+                        role="img"
+                        aria-label="Imagen actual de la Home"
+                        className="mt-3 h-24 w-40 border border-white/10 bg-cover bg-center"
+                        style={{ backgroundImage: `url(${currentHeroUrl})` }}
+                      />
+                    ) : (
+                      <p className="mt-3 text-[12px] text-[#F6D36F]">Esta galería todavía no tiene imagen para la Home.</p>
+                    )}
+                    {heroPhotos.length ? (
+                      <div className="mt-3 grid max-h-56 grid-cols-4 gap-2 overflow-y-auto pr-1 sm:grid-cols-6">
+                        {heroPhotos.map((photo, index) => (
+                          <button
+                            key={photo.id}
+                            type="button"
+                            onClick={() => setHeroPhotoId(photo.id)}
+                            aria-pressed={heroPhotoId === photo.id}
+                            title={`Foto ${index + 1} · ${photo.title}`}
+                            className={`relative aspect-[4/3] overflow-hidden border-2 bg-[#0B0F14] ${heroPhotoId === photo.id ? "border-[#FFC94A]" : "border-transparent"}`}
+                          >
+                            {photo.thumbnail_url ? (
+                              <span className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${photo.thumbnail_url})` }} />
+                            ) : null}
+                            <span className="absolute left-1 top-1 bg-[#0B0F14]/70 px-1 font-mono text-[9px] text-[#F4F1E8]">{index + 1}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-[12px] text-[#8A9A93]">Subí fotos a esta galería para elegir la imagen de la Home.</p>
+                    )}
+                    <button
+                      type="button"
+                      disabled={!heroPhotoId || isGeneratingHero || isUploading || isSavingGallery}
+                      onClick={() => void handleGenerateHero()}
+                      className="mt-4 border border-[#FFC94A]/60 px-4 py-2.5 text-[12px] font-semibold uppercase tracking-[0.08em] text-[#FFC94A] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isGeneratingHero ? "Generando..." : "Generar imagen para la Home"}
+                    </button>
+                  </>
+                )}
+              </div>
+            ) : null}
           </div>
 
           <div className="rounded-[5px] border border-white/10 bg-[#111820] p-6">
@@ -759,7 +918,7 @@ export default function AdminPage() {
                         <a href={match.slug ? `/galeria/${match.slug}` : "/galeria"} className="hover:text-[#FFC94A]">Ver</a>
                         <button
                           type="button"
-                          disabled={!match.id || isUploading || isSavingGallery}
+                          disabled={!match.id || isUploading || isSavingGallery || isGeneratingHero}
                           onClick={() => match.id && void handleEditGallery(match.id)}
                           className="hover:text-[#FFC94A] disabled:cursor-not-allowed disabled:opacity-60"
                         >
