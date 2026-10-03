@@ -13,8 +13,8 @@ export default function GalleryPage() {
     number: number;
     title: string;
     price: number;
-    imageUrl?: string;
     watermarkUrl?: string;
+    thumbnailUrl?: string;
   };
 
   const [selected, setSelected] = useState<string[]>([]);
@@ -35,8 +35,8 @@ export default function GalleryPage() {
       const id = String(photo.id);
       const number = Number.isFinite(Number(photo.number)) ? Number(photo.number) : index + 1;
       const price = Number.isFinite(Number(photo.price)) ? Number(photo.price) : 1500;
-      const imageUrl = typeof photo.imageUrl === "string" ? photo.imageUrl : "";
-      const watermarkUrl = typeof photo.watermarkUrl === "string" ? photo.watermarkUrl : imageUrl;
+      const watermarkUrl = typeof photo.watermarkUrl === "string" ? photo.watermarkUrl : undefined;
+      const thumbnailUrl = typeof photo.thumbnailUrl === "string" ? photo.thumbnailUrl : undefined;
 
       if (!unique.has(id)) {
         unique.set(id, {
@@ -44,8 +44,8 @@ export default function GalleryPage() {
           id,
           number,
           price,
-          imageUrl,
           watermarkUrl,
+          thumbnailUrl,
         });
       }
     });
@@ -265,7 +265,8 @@ export default function GalleryPage() {
                   const displayPrice = photoPrice >= 1500 ? "$1.500" : "$900";
                   const photoKey = `photo-${photo.id ?? index + 1}-${photo.number ?? index + 1}-${index}`;
                   const paletteIndex = ((Number(photo.id) || Number(photo.number) || index + 1) % 6) + 1;
-                  const mediaUrl = isSelected ? (photo.imageUrl || "/logo-vision-pelusa.svg") : (photo.watermarkUrl || photo.imageUrl || "/logo-vision-pelusa.svg");
+                  // Watermarked thumbnail (or preview) whether selected or not: the original never reaches the page.
+                  const mediaUrl = photo.thumbnailUrl || photo.watermarkUrl || "/logo-vision-pelusa.svg";
 
                   return (
                     <button
@@ -300,13 +301,6 @@ export default function GalleryPage() {
                         }}
                       />
 
-                      <div className="absolute inset-[-30%_-60%] flex flex-wrap content-around rotate-[-18deg] opacity-[0.18] transition-opacity group-hover:opacity-0">
-                        {Array.from({ length: 5 }).map((_, i) => (
-                          <span key={i} className="mono w-full text-center text-[9.5px] uppercase tracking-[0.15em] text-[#F4F1E8]">
-                            Visión Pelusa
-                          </span>
-                        ))}
-                      </div>
 
                       <div className="absolute left-2 top-2 z-10 rounded-sm bg-[#0B0F14]/60 px-2 py-1 font-mono text-[10px] text-[#8A9A93]">
                         {photo.number}

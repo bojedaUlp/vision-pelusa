@@ -11,6 +11,7 @@ import {
   type ProductPhoto,
   type PurchaseRecord,
 } from "./mock-data";
+import { protectedImageUrl } from "./protected-images";
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase";
 
 const legacySlugMap: Record<string, string> = {
@@ -61,12 +62,17 @@ const formatMatchCard = (match: any) => ({
 
 // Published galleries for cards: the cover (first photo by sort_order, same rule as before) is
 // embedded in the same query, limited to one row per gallery, instead of downloading every photo.
-const GALLERY_CARD_SELECT = "*, photos(image_url, sort_order)";
+// Only the watermarked thumbnail/preview is read; image_url (the original) is never selected.
+const GALLERY_CARD_SELECT = "*, photos(thumbnail_url, watermark_url, sort_order)";
 
 const withEmbeddedCover = (match: any) => {
   const firstPhoto = Array.isArray(match.photos) ? match.photos[0] : null;
-  const coverUrl = String(firstPhoto?.image_url ?? "").trim();
-  return formatMatchCard({ ...match, cover_url: coverUrl || match.cover_url || undefined });
+  const thumbnailUrl = protectedImageUrl(firstPhoto?.thumbnail_url);
+  const previewUrl = protectedImageUrl(firstPhoto?.watermark_url);
+  return {
+    ...formatMatchCard({ ...match, cover_url: thumbnailUrl ?? previewUrl ?? protectedImageUrl(match.cover_url) ?? "" }),
+    previewUrl: previewUrl ?? thumbnailUrl,
+  };
 };
 
 export const HOME_GALLERY_LIMIT = 6;
@@ -148,16 +154,15 @@ const formatPhoto = (photo: any, index = 0): ProductPhoto => {
   // number is only the visual position in the sort_order-ordered result.
   const number = index + 1;
   const safePrice = Number(photo.price ?? 1500);
-  const imageUrl = String(photo.image_url ?? photo.imageUrl ?? "") || "";
-  const watermarkUrl = String(photo.watermark_url ?? photo.watermarkUrl ?? imageUrl) || imageUrl;
 
+  // Public galleries only get watermarked images. imageUrl (original) is intentionally not set.
   return {
     id: String(photo.id),
     title: photo.title ?? `Foto ${number}`,
     price: Number.isFinite(safePrice) ? safePrice : 1500,
     number,
-    imageUrl: imageUrl || undefined,
-    watermarkUrl: watermarkUrl || undefined,
+    watermarkUrl: protectedImageUrl(photo.watermark_url),
+    thumbnailUrl: protectedImageUrl(photo.thumbnail_url),
     isPublished: photo.is_published ?? true,
   };
 };
@@ -358,7 +363,7 @@ export async function getPhotosByMatchSlug(slug: string): Promise<ProductPhoto[]
 
     const { data, error } = await supabase
       .from("photos")
-      .select("*")
+      .select("id, match_id, title, sort_order, price, watermark_url, thumbnail_url, is_published")
       .eq("match_id", match.id)
       .order("sort_order", { ascending: true });
 

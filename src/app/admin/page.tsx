@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { clearAdminSession, getCurrentAdminProfile, isAdminSessionActive, setAdminSession } from "@/lib/admin-auth";
 import { getAdminData } from "@/lib/data-source";
+import { ORIGINALS_BUCKET, PREVIEWS_BUCKET, storagePathInBucket } from "@/lib/protected-images";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
+import { createProtectedVariants } from "@/lib/watermark";
 
 type UploadItem = {
   name: string;
@@ -13,6 +15,30 @@ type UploadItem = {
 };
 
 const MAX_UPLOAD_BATCH = 100;
+
+type SupabaseClient = ReturnType<typeof getSupabaseClient>;
+
+// Uploads the watermarked PREVIEW + THUMBNAIL to the public "previews" bucket.
+// If anything fails, removes what it uploaded and throws.
+async function uploadProtectedVariants(supabase: SupabaseClient, source: Blob, keyBase: string) {
+  const { preview, thumbnail } = await createProtectedVariants(source);
+  const bucket = supabase.storage.from(PREVIEWS_BUCKET);
+  const uploaded: string[] = [];
+  try {
+    const urls: string[] = [];
+    for (const [suffix, blob] of [["preview", preview], ["thumb", thumbnail]] as const) {
+      const path = `${keyBase}-${suffix}.jpg`;
+      const { data, error } = await bucket.upload(path, blob, { contentType: "image/jpeg", cacheControl: "31536000", upsert: false });
+      if (error || !data) throw new Error(error?.message ?? "No se pudo subir la imagen protegida.");
+      uploaded.push(data.path);
+      urls.push(bucket.getPublicUrl(data.path).data.publicUrl);
+    }
+    return { previewUrl: urls[0], thumbnailUrl: urls[1], paths: uploaded };
+  } catch (error) {
+    if (uploaded.length) await bucket.remove(uploaded).catch(() => undefined);
+    throw error;
+  }
+}
 
 // No default gallery: the form starts empty so nothing can be created or targeted implicitly.
 const emptyGalleryForm = {
@@ -39,12 +65,98 @@ export default function AdminPage() {
   // Single source of truth for the gallery being edited and receiving uploads: matches.id (UUID).
   const [selectedGalleryId, setSelectedGalleryId] = useState<string | null>(null);
   const [isSavingGallery, setIsSavingGallery] = useState(false);
+  // Photos without a protected thumbnail (uploaded before the watermark pipeline). null = unknown.
+  const [pendingPreviews, setPendingPreviews] = useState<number | null>(null);
+  const [isGeneratingPreviews, setIsGeneratingPreviews] = useState(false);
   const editRequestRef = useRef(0);
 
-  const loadAdminData = async () => {
+  // Stable (only state setters and module imports), so the mount effect runs once.
+  const loadPendingPreviews = useCallback(async () => {
+    const { count, error } = await getSupabaseClient()
+      .from("photos")
+      .select("id", { count: "exact", head: true })
+      .is("thumbnail_url", null);
+    setPendingPreviews(error ? null : count ?? 0);
+  }, []);
+
+  const loadAdminData = useCallback(async () => {
     const data = await getAdminData();
     setStats(data.stats);
     setMatches(data.matches);
+    await loadPendingPreviews();
+  }, [loadPendingPreviews]);
+
+  // One-time backfill for photos uploaded before the watermark pipeline. The original is read with
+  // the admin session (works with the "photos" bucket public or private) and only the watermarked
+  // variants are published. Originals are not moved or deleted.
+  const handleGenerateMissingPreviews = async () => {
+    const supabase = getSupabaseClient();
+    setIsGeneratingPreviews(true);
+    setStatusMessage("Buscando fotos sin preview protegida...");
+
+    const { data: pending, error } = await supabase
+      .from("photos")
+      .select("id, match_id, image_url")
+      .is("thumbnail_url", null)
+      .order("created_at", { ascending: true })
+      .limit(1000);
+
+    if (error) {
+      setStatusMessage(`No se pudo consultar las fotos: ${error.message}`);
+      setIsGeneratingPreviews(false);
+      return;
+    }
+
+    const rows = (pending ?? []) as Array<{ id: string; match_id: string; image_url: string | null }>;
+    const failed: string[] = [];
+    let done = 0;
+
+    for (const [index, photo] of rows.entries()) {
+      setStatusMessage(`Generando previews protegidas: ${index + 1} de ${rows.length}...`);
+      let uploadedPaths: string[] = [];
+      try {
+        if (!photo.image_url) throw new Error("sin image_url");
+
+        let source: Blob | null = null;
+        const originalPath = storagePathInBucket(photo.image_url, ORIGINALS_BUCKET);
+        if (originalPath) {
+          const { data } = await supabase.storage.from(ORIGINALS_BUCKET).download(originalPath);
+          source = data ?? null;
+        }
+        if (!source) {
+          const response = await fetch(photo.image_url);
+          if (!response.ok) throw new Error(`no se pudo leer el original (${response.status})`);
+          source = await response.blob();
+        }
+
+        const variants = await uploadProtectedVariants(supabase, source, `${photo.match_id}/${photo.id}-${Date.now()}`);
+        uploadedPaths = variants.paths;
+
+        const { data: updated, error: updateError } = await supabase
+          .from("photos")
+          .update({ watermark_url: variants.previewUrl, thumbnail_url: variants.thumbnailUrl })
+          .eq("id", photo.id)
+          .select("id");
+
+        if (updateError || !updated?.length) {
+          throw new Error(updateError?.message ?? "la base no permitió actualizar la foto");
+        }
+        done += 1;
+      } catch (error) {
+        if (uploadedPaths.length) {
+          await supabase.storage.from(PREVIEWS_BUCKET).remove(uploadedPaths).catch(() => undefined);
+        }
+        failed.push(`${photo.id} (${error instanceof Error ? error.message : "error"})`);
+      }
+    }
+
+    setStatusMessage(
+      failed.length
+        ? `Previews generadas: ${done} de ${rows.length}. Fallaron: ${failed.join(", ")}.`
+        : `Previews protegidas generadas para ${done} foto${done === 1 ? "" : "s"}.`,
+    );
+    setIsGeneratingPreviews(false);
+    await loadPendingPreviews();
   };
 
   useEffect(() => {
@@ -87,7 +199,7 @@ export default function AdminPage() {
     };
 
     void verifySession();
-  }, []);
+  }, [loadAdminData]);
 
   const handleAdminLogin = async () => {
     setLoginError("");
@@ -274,17 +386,25 @@ export default function AdminPage() {
         for (const [index, file] of filesToUpload.entries()) {
           const fileName = `${Date.now()}-${index}-${file.name.replace(/\s+/g, "-")}`;
           const storagePath = `${galleryId}/${fileName}`;
+          let originalPath: string | null = null;
+          let previewPaths: string[] = [];
 
           try {
-            const { data, error } = await supabase.storage.from("photos").upload(storagePath, file, { upsert: true });
+            // ORIGINAL → private "photos" bucket.
+            const { data, error } = await supabase.storage.from(ORIGINALS_BUCKET).upload(storagePath, file, { upsert: false });
 
             if (error || !data) {
               throw new Error(error?.message ?? "No se pudo subir el archivo al storage.");
             }
+            originalPath = data.path;
 
-            const { data: publicData } = supabase.storage.from("photos").getPublicUrl(data.path);
-            const imageUrl = publicData.publicUrl || URL.createObjectURL(file);
-            const watermarkUrl = `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}watermark=vision-pelusa`;
+            // PREVIEW + THUMBNAIL with the watermark in the pixels → public "previews" bucket.
+            const variants = await uploadProtectedVariants(supabase, file, storagePath.replace(/\.[^./]+$/, ""));
+            previewPaths = variants.paths;
+
+            // image_url only records where the original lives (used by /api/download, which signs
+            // it after validating a purchase). It is not publicly readable once "photos" is private.
+            const imageUrl = supabase.storage.from(ORIGINALS_BUCKET).getPublicUrl(data.path).data.publicUrl;
 
             const { error: insertError } = await supabase.from("photos").insert([
               {
@@ -293,24 +413,30 @@ export default function AdminPage() {
                 sort_order: index,
                 price: parsePriceValue(form.price),
                 image_url: imageUrl,
-                watermark_url: watermarkUrl,
+                watermark_url: variants.previewUrl,
+                thumbnail_url: variants.thumbnailUrl,
                 is_published: true,
               },
             ]);
 
             if (insertError) {
-              await supabase.storage.from("photos").remove([data.path]).catch(() => undefined);
               throw new Error(insertError.message ?? "No se pudo registrar la foto en la base de datos.");
             }
 
             nextUploads.push({
               name: file.name,
-              url: imageUrl,
+              url: variants.thumbnailUrl,
               uploaded: true,
-              note: "Subida a Supabase",
+              note: "Subida con preview protegida",
             });
             successfulCount += 1;
           } catch (error) {
+            if (previewPaths.length) {
+              await supabase.storage.from(PREVIEWS_BUCKET).remove(previewPaths).catch(() => undefined);
+            }
+            if (originalPath) {
+              await supabase.storage.from(ORIGINALS_BUCKET).remove([originalPath]).catch(() => undefined);
+            }
             const fileError = error instanceof Error ? error.message : "Error desconocido";
             failedFiles.push(`${file.name} (${fileError})`);
             nextUploads.push({
@@ -567,7 +693,7 @@ export default function AdminPage() {
 
             <button
               type="button"
-              disabled={isUploading || !selectedGalleryId}
+              disabled={isUploading || isGeneratingPreviews || !selectedGalleryId}
               onClick={handleUpload}
               className="mt-5 w-full bg-[#FFC94A] px-4 py-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-[#0B0F14] disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -575,6 +701,26 @@ export default function AdminPage() {
             </button>
 
             <p className="mt-4 text-[12px] text-[#8A9A93]">{statusMessage}</p>
+
+            {pendingPreviews === null ? (
+              <p className="mt-4 border-t border-white/10 pt-4 text-[12px] text-[#fca5a5]">
+                No se pudo verificar la protección de imágenes. Aplicá la migración 20261003_protected_previews.sql.
+              </p>
+            ) : pendingPreviews > 0 ? (
+              <div className="mt-4 border-t border-white/10 pt-4">
+                <p className="text-[12px] text-[#F6D36F]">
+                  {pendingPreviews} foto{pendingPreviews === 1 ? "" : "s"} sin preview protegida.
+                </p>
+                <button
+                  type="button"
+                  disabled={isGeneratingPreviews || isUploading}
+                  onClick={() => void handleGenerateMissingPreviews()}
+                  className="mt-3 w-full border border-[#FFC94A]/60 px-4 py-2.5 text-[12px] font-semibold uppercase tracking-[0.08em] text-[#FFC94A] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isGeneratingPreviews ? "Generando..." : "Generar previews protegidas"}
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
 

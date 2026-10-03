@@ -65,6 +65,7 @@ create table if not exists public.photos (
   price integer not null default 1500,
   image_url text,
   watermark_url text,
+  thumbnail_url text,
   is_published boolean not null default true,
   created_at timestamptz not null default now()
 );

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { protectedImageUrl } from "./protected-images";
 import { getSupabaseAdmin, SupabaseAdminConfigError } from "./supabase-admin";
 import { getPriceForCount } from "./mock-data";
 import {
@@ -402,7 +403,7 @@ function toPaidPurchase(row: PurchaseRow): PaidPurchase {
       id: String(item.photo_id),
       number: index + 1,
       title: item.photos?.title ?? `Foto ${index + 1}`,
-      previewUrl: item.photos?.watermark_url || null,
+      previewUrl: protectedImageUrl(item.photos?.watermark_url) ?? null,
       unitPrice: Number(item.unit_price ?? 0),
     }));
 

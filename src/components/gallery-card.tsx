@@ -20,13 +20,6 @@ export function GalleryCard({ card, index }: { card: GalleryCardData; index: num
             }}
           />
           <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.06),rgba(0,0,0,0.28))]" />
-          <div className="absolute inset-[-20%_-50%] flex flex-wrap content-around rotate-[-18deg] opacity-20">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <span key={i} className="mono w-full text-center text-[11px] uppercase tracking-[0.15em] text-[#F4F1E8]">
-                Visión Pelusa
-              </span>
-            ))}
-          </div>
           <div className="relative z-10 flex h-full items-center justify-center mono text-[12px] uppercase tracking-[0.1em] text-white/80">
             {card.tag}
           </div>
