@@ -28,15 +28,30 @@ psql_run() {
   docker run --rm -i -e PGURI="$DB_URL" postgres:17-alpine sh -c 'psql "$PGURI" -v ON_ERROR_STOP=1 -X -q "$@"' psql "$@"
 }
 
-schema_exists() { [[ "$(psql_run -tAc "select to_regclass('public.matches') is not null")" == "t" ]]; }
+# Any connection/query error aborts: an error must never be read as "schema not applied".
+schema_state() {
+  local result
+  if ! result="$(psql_run -tAc "select to_regclass('public.matches') is not null" 2>&1)"; then
+    echo "ABORTADO: no se pudo consultar la base (revisá SUPABASE_DB_URL / contraseña)." >&2
+    exit 1
+  fi
+  case "$result" in
+    t) echo "applied" ;;
+    f) echo "empty" ;;
+    *) echo "ABORTADO: respuesta inesperada de la base." >&2; exit 1 ;;
+  esac
+}
+schema_exists() { [[ "$(schema_state)" == "applied" ]]; }
 
 case "${1:-}" in
   --check)
-    psql_run -tAc "select 1" >/dev/null && echo "Conexión al proyecto $EXPECTED_REF: OK"
-    if schema_exists; then echo "Esquema: YA aplicado"; else echo "Esquema: no aplicado (base vacía)"; fi
+    STATE="$(schema_state)"
+    echo "Conexión al proyecto $EXPECTED_REF: OK"
+    if [[ "$STATE" == "applied" ]]; then echo "Esquema: YA aplicado"; else echo "Esquema: no aplicado (base vacía)"; fi
     ;;
   --apply)
-    if schema_exists; then echo "ABORTADO: el esquema ya existe en $EXPECTED_REF. No se modifica nada."; exit 1; fi
+    STATE="$(schema_state)"
+    if [[ "$STATE" == "applied" ]]; then echo "ABORTADO: el esquema ya existe en $EXPECTED_REF. No se modifica nada."; exit 1; fi
     echo "Aplicando supabase/schema.sql en $EXPECTED_REF (una transacción)..."
     psql_run < "$ROOT/supabase/schema.sql" >/dev/null
     TABLES=$(psql_run -tAc "select count(*) from information_schema.tables where table_schema = 'public' and table_name in ('profiles','matches','photos','purchases','purchase_items','download_access')")
