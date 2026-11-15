@@ -26,5 +26,21 @@
   },
   "images": {
     "binding": "IMAGES"
+  },
+  // Photo storage. ORIGINALS: private (no public access, no custom domain), read only by this
+  // Worker after validating a purchase. MEDIA: watermarked previews/thumbnails/heroes, public.
+  "r2_buckets": [
+    {
+      "binding": "ORIGINALS_BUCKET",
+      "bucket_name": "vision-pelusa-originals"
+    },
+    {
+      "binding": "MEDIA_BUCKET",
+      "bucket_name": "vision-pelusa-media"
+    }
+  ],
+  "vars": {
+    // Operational storage budget in bytes (8 GB, below R2's free 10 GB-month).
+    "STORAGE_BUDGET_BYTES": "8000000000"
   }
 }

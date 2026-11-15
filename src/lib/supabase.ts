@@ -1,12 +1,11 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
-const fallbackSupabaseUrl = "https://cvawwrxpdshebfizfgvp.supabase.co";
-const fallbackSupabaseAnonKey = "sb_publishable_TUuUZo60svB5P7gyUdqulw_JdxxHzlb";
+// Public (anon/publishable) values, inlined at build time. No hardcoded fallback: the app must be
+// built with the project it talks to (NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY).
+const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").trim();
+const supabaseAnonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "").trim();
 
-const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? fallbackSupabaseUrl).trim();
-const supabaseAnonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? fallbackSupabaseAnonKey).trim();
-
-export const supabase = createSupabaseClient(supabaseUrl, supabaseAnonKey, {
+export const supabase = createSupabaseClient(supabaseUrl || "http://localhost.invalid", supabaseAnonKey || "missing", {
   auth: {
     persistSession: true,
     autoRefreshToken: true,

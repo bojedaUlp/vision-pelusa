@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clearAdminSession, getCurrentAdminProfile, isAdminSessionActive, setAdminSession } from "@/lib/admin-auth";
 import { getAdminData } from "@/lib/data-source";
-import { ORIGINALS_BUCKET, PREVIEWS_BUCKET, protectedImageUrl, storagePathInBucket } from "@/lib/protected-images";
+import { protectedImageUrl } from "@/lib/protected-images";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 import { createHeroVariant, createProtectedVariants } from "@/lib/watermark";
+import { adminApi, adminFetchBlob, adminUpload, AlbumPhotosPanel, DeletionModal, StorageIndicator, type DeletionPlan } from "./photo-cleanup";
 
 type UploadItem = {
   name: string;
@@ -16,26 +17,38 @@ type UploadItem = {
 
 const MAX_UPLOAD_BATCH = 100;
 
-type SupabaseClient = ReturnType<typeof getSupabaseClient>;
+class StorageFullError extends Error {}
 
-// Uploads the watermarked PREVIEW + THUMBNAIL to the public "previews" bucket.
-// If anything fails, removes what it uploaded and throws.
-async function uploadProtectedVariants(supabase: SupabaseClient, source: Blob, keyBase: string) {
-  const { preview, thumbnail } = await createProtectedVariants(source);
-  const bucket = supabase.storage.from(PREVIEWS_BUCKET);
-  const uploaded: string[] = [];
+// One photo → R2 through the admin API: the watermarked PREVIEW + THUMBNAIL are generated here
+// (watermark baked into the pixels), the space is reserved server-side before sending anything,
+// and the photo is only published after the server verified the three files. Any failure
+// releases the reservation and removes what was already sent.
+async function uploadPhoto(file: File, albumId: string, sortOrder: number, price: number) {
+  const { preview, thumbnail } = await createProtectedVariants(file);
+  let photoId: string;
   try {
-    const urls: string[] = [];
-    for (const [suffix, blob] of [["preview", preview], ["thumb", thumbnail]] as const) {
-      const path = `${keyBase}-${suffix}.jpg`;
-      const { data, error } = await bucket.upload(path, blob, { contentType: "image/jpeg", cacheControl: "31536000", upsert: false });
-      if (error || !data) throw new Error(error?.message ?? "No se pudo subir la imagen protegida.");
-      uploaded.push(data.path);
-      urls.push(bucket.getPublicUrl(data.path).data.publicUrl);
-    }
-    return { previewUrl: urls[0], thumbnailUrl: urls[1], paths: uploaded };
+    ({ photoId } = await adminApi<{ photoId: string }>("/api/admin/uploads", {
+      albumId,
+      title: file.name,
+      sortOrder,
+      price,
+      originalBytes: file.size,
+      previewBytes: preview.size,
+      thumbBytes: thumbnail.size,
+    }));
   } catch (error) {
-    if (uploaded.length) await bucket.remove(uploaded).catch(() => undefined);
+    if (error instanceof Error && error.message.includes("límite de almacenamiento")) throw new StorageFullError(error.message);
+    throw error;
+  }
+
+  try {
+    await adminUpload(`/api/admin/uploads/${photoId}/original`, file, file.type || "image/jpeg");
+    await adminUpload(`/api/admin/uploads/${photoId}/preview`, preview, "image/jpeg");
+    await adminUpload(`/api/admin/uploads/${photoId}/thumb`, thumbnail, "image/jpeg");
+    const done = await adminApi<{ thumbnailUrl: string }>(`/api/admin/uploads/${photoId}/complete`, {});
+    return done.thumbnailUrl;
+  } catch (error) {
+    await adminApi(`/api/admin/uploads/${photoId}/abort`, {}).catch(() => undefined);
     throw error;
   }
 }
@@ -65,9 +78,6 @@ export default function AdminPage() {
   // Single source of truth for the gallery being edited and receiving uploads: matches.id (UUID).
   const [selectedGalleryId, setSelectedGalleryId] = useState<string | null>(null);
   const [isSavingGallery, setIsSavingGallery] = useState(false);
-  // Photos without a protected thumbnail (uploaded before the watermark pipeline). null = unknown.
-  const [pendingPreviews, setPendingPreviews] = useState<number | null>(null);
-  const [isGeneratingPreviews, setIsGeneratingPreviews] = useState(false);
   // Home hero of the selected gallery: the admin picks one photo explicitly.
   const [heroPhotos, setHeroPhotos] = useState<Array<{ id: string; title: string; thumbnail_url: string | null }>>([]);
   const [heroPhotoId, setHeroPhotoId] = useState<string | null>(null);
@@ -75,95 +85,21 @@ export default function AdminPage() {
   const [heroUnavailable, setHeroUnavailable] = useState(false);
   const [isGeneratingHero, setIsGeneratingHero] = useState(false);
   const editRequestRef = useRef(0);
+  // Photo management / archive / deletion (see ./photo-cleanup.tsx).
+  const [photosPanel, setPhotosPanel] = useState<{ id: string; title: string } | null>(null);
+  const [photosReloadKey, setPhotosReloadKey] = useState(0);
+  const [deletionPlan, setDeletionPlan] = useState<DeletionPlan | null>(null);
+  const [selectedAlbums, setSelectedAlbums] = useState<Set<string>>(new Set());
+  const [isAlbumBusy, setIsAlbumBusy] = useState(false);
+  const [storageReloadKey, setStorageReloadKey] = useState(0);
 
   // Stable (only state setters and module imports), so the mount effect runs once.
-  const loadPendingPreviews = useCallback(async () => {
-    const { count, error } = await getSupabaseClient()
-      .from("photos")
-      .select("id", { count: "exact", head: true })
-      .is("thumbnail_url", null);
-    setPendingPreviews(error ? null : count ?? 0);
-  }, []);
-
   const loadAdminData = useCallback(async () => {
     const data = await getAdminData();
     setStats(data.stats);
     setMatches(data.matches);
-    await loadPendingPreviews();
-  }, [loadPendingPreviews]);
-
-  // One-time backfill for photos uploaded before the watermark pipeline. The original is read with
-  // the admin session (works with the "photos" bucket public or private) and only the watermarked
-  // variants are published. Originals are not moved or deleted.
-  const handleGenerateMissingPreviews = async () => {
-    const supabase = getSupabaseClient();
-    setIsGeneratingPreviews(true);
-    setStatusMessage("Buscando fotos sin preview protegida...");
-
-    const { data: pending, error } = await supabase
-      .from("photos")
-      .select("id, match_id, image_url")
-      .is("thumbnail_url", null)
-      .order("created_at", { ascending: true })
-      .limit(1000);
-
-    if (error) {
-      setStatusMessage(`No se pudo consultar las fotos: ${error.message}`);
-      setIsGeneratingPreviews(false);
-      return;
-    }
-
-    const rows = (pending ?? []) as Array<{ id: string; match_id: string; image_url: string | null }>;
-    const failed: string[] = [];
-    let done = 0;
-
-    for (const [index, photo] of rows.entries()) {
-      setStatusMessage(`Generando previews protegidas: ${index + 1} de ${rows.length}...`);
-      let uploadedPaths: string[] = [];
-      try {
-        if (!photo.image_url) throw new Error("sin image_url");
-
-        let source: Blob | null = null;
-        const originalPath = storagePathInBucket(photo.image_url, ORIGINALS_BUCKET);
-        if (originalPath) {
-          const { data } = await supabase.storage.from(ORIGINALS_BUCKET).download(originalPath);
-          source = data ?? null;
-        }
-        if (!source) {
-          const response = await fetch(photo.image_url);
-          if (!response.ok) throw new Error(`no se pudo leer el original (${response.status})`);
-          source = await response.blob();
-        }
-
-        const variants = await uploadProtectedVariants(supabase, source, `${photo.match_id}/${photo.id}-${Date.now()}`);
-        uploadedPaths = variants.paths;
-
-        const { data: updated, error: updateError } = await supabase
-          .from("photos")
-          .update({ watermark_url: variants.previewUrl, thumbnail_url: variants.thumbnailUrl })
-          .eq("id", photo.id)
-          .select("id");
-
-        if (updateError || !updated?.length) {
-          throw new Error(updateError?.message ?? "la base no permitió actualizar la foto");
-        }
-        done += 1;
-      } catch (error) {
-        if (uploadedPaths.length) {
-          await supabase.storage.from(PREVIEWS_BUCKET).remove(uploadedPaths).catch(() => undefined);
-        }
-        failed.push(`${photo.id} (${error instanceof Error ? error.message : "error"})`);
-      }
-    }
-
-    setStatusMessage(
-      failed.length
-        ? `Previews generadas: ${done} de ${rows.length}. Fallaron: ${failed.join(", ")}.`
-        : `Previews protegidas generadas para ${done} foto${done === 1 ? "" : "s"}.`,
-    );
-    setIsGeneratingPreviews(false);
-    await loadPendingPreviews();
-  };
+    setStorageReloadKey((key) => key + 1);
+  }, []);
 
   useEffect(() => {
     const verifySession = async () => {
@@ -307,7 +243,7 @@ export default function AdminPage() {
       title: data.title ?? "",
       slug: data.slug ?? "",
       subtitle: data.subtitle ?? "",
-      status: data.status === "published" ? "Publicada" : "Borrador",
+      status: data.status === "published" ? "Publicada" : data.status === "archived" ? "Archivada" : "Borrador",
     }));
     setStatusMessage(`Editando "${data.title}". Las fotos se subirán a esta galería.`);
 
@@ -318,6 +254,7 @@ export default function AdminPage() {
         .from("photos")
         .select("id, title, thumbnail_url")
         .eq("match_id", galleryId)
+        .eq("is_published", true)
         .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true })
         .limit(500),
@@ -335,9 +272,9 @@ export default function AdminPage() {
     }
   };
 
-  // HERO for the Home: generated from the original of the photo the admin picked, uploaded to
-  // "previews", saved in matches.hero_url. The previous hero file of this gallery is removed only
-  // after the new one is saved.
+  // HERO for the Home: generated in the browser from the original of the photo the admin picked
+  // (read through the admin API), uploaded to the public media bucket by the server, which also
+  // removes the previous hero file of this gallery.
   const handleGenerateHero = async () => {
     const galleryId = selectedGalleryId;
     const photoId = heroPhotoId;
@@ -346,56 +283,16 @@ export default function AdminPage() {
       return;
     }
 
-    const supabase = getSupabaseClient();
-    const previews = supabase.storage.from(PREVIEWS_BUCKET);
     setIsGeneratingHero(true);
     setStatusMessage("Generando imagen para la Home...");
-    let newPath: string | null = null;
-
     try {
-      const [{ data: photo, error: photoError }, { data: gallery, error: galleryError }] = await Promise.all([
-        supabase.from("photos").select("id, match_id, image_url").eq("id", photoId).eq("match_id", galleryId).single(),
-        supabase.from("matches").select("hero_url").eq("id", galleryId).single(),
-      ]);
-      if (photoError || !photo?.image_url) throw new Error(photoError?.message ?? "la foto no pertenece a esta galería");
-      if (galleryError) throw new Error(galleryError.message);
-      const previousHeroUrl: string | null = gallery?.hero_url ?? null;
-
-      // Original read with the admin session (bucket "photos" is private).
-      const originalPath = storagePathInBucket(photo.image_url, ORIGINALS_BUCKET);
-      if (!originalPath) throw new Error("la foto no tiene un original en el bucket privado");
-      const { data: original, error: downloadError } = await supabase.storage.from(ORIGINALS_BUCKET).download(originalPath);
-      if (downloadError || !original) throw new Error(downloadError?.message ?? "no se pudo leer el original");
-
+      const original = await adminFetchBlob(`/api/admin/photos/${photoId}/original`);
       const hero = await createHeroVariant(original);
-      const { data: uploaded, error: uploadError } = await previews.upload(`${galleryId}/hero-${Date.now()}.jpg`, hero, {
-        contentType: "image/jpeg",
-        cacheControl: "31536000",
-        upsert: false,
-      });
-      if (uploadError || !uploaded) throw new Error(uploadError?.message ?? "no se pudo subir la imagen");
-      newPath = uploaded.path;
-      const heroUrl = previews.getPublicUrl(uploaded.path).data.publicUrl;
-
-      const { data: updated, error: updateError } = await supabase
-        .from("matches")
-        .update({ hero_url: heroUrl })
-        .eq("id", galleryId)
-        .select("id");
-      if (updateError || !updated?.length) throw new Error(updateError?.message ?? "la base no permitió guardar el hero");
-      newPath = null; // saved: keep it
-
+      const { heroUrl } = await adminUpload<{ heroUrl: string }>(`/api/admin/albums/${galleryId}/hero`, hero, "image/jpeg");
       setCurrentHeroUrl(heroUrl);
-      let cleanupNote = "";
-      // Remove the previous hero only if it is this gallery's hero file in "previews".
-      const previousPath = previousHeroUrl ? storagePathInBucket(previousHeroUrl, PREVIEWS_BUCKET) : null;
-      if (previousPath && previousPath !== uploaded.path && previousPath.startsWith(`${galleryId}/hero-`)) {
-        const { error: removeError } = await previews.remove([previousPath]);
-        if (removeError) cleanupNote = ` (no se pudo borrar el hero anterior: ${removeError.message})`;
-      }
-      setStatusMessage(`Imagen para la Home actualizada${cleanupNote}.`);
+      setStatusMessage("Imagen para la Home actualizada.");
+      setStorageReloadKey((key) => key + 1);
     } catch (error) {
-      if (newPath) await previews.remove([newPath]).catch(() => undefined);
       setStatusMessage(`No se pudo generar la imagen para la Home: ${error instanceof Error ? error.message : "error desconocido"}`);
     } finally {
       setIsGeneratingHero(false);
@@ -413,7 +310,7 @@ export default function AdminPage() {
     }
 
     const venue = subtitle.includes("·") ? subtitle.split("·")[0].trim() : "Cancha Norte";
-    const status = form.status === "Publicada" ? "published" : "draft";
+    const status = form.status === "Publicada" ? "published" : form.status === "Archivada" ? "archived" : "draft";
     const supabase = getSupabaseClient();
     const editingId = selectedGalleryId;
 
@@ -478,117 +375,89 @@ export default function AdminPage() {
     }
 
     const filesToUpload = selectedFiles.slice(0, MAX_UPLOAD_BATCH);
+    const price = parsePriceValue(form.price);
     setIsUploading(true);
-    setStatusMessage(`Subiendo ${filesToUpload.length} imagen${filesToUpload.length > 1 ? "es" : ""}...`);
 
-    const supabase = isSupabaseConfigured() ? getSupabaseClient() : null;
     const nextUploads: UploadItem[] = [];
     const failedFiles: string[] = [];
     let successfulCount = 0;
+    let stoppedForSpace = false;
 
-    try {
-      if (supabase) {
-        for (const [index, file] of filesToUpload.entries()) {
-          const fileName = `${Date.now()}-${index}-${file.name.replace(/\s+/g, "-")}`;
-          const storagePath = `${galleryId}/${fileName}`;
-          let originalPath: string | null = null;
-          let previewPaths: string[] = [];
-
-          try {
-            // ORIGINAL → private "photos" bucket.
-            const { data, error } = await supabase.storage.from(ORIGINALS_BUCKET).upload(storagePath, file, { upsert: false });
-
-            if (error || !data) {
-              throw new Error(error?.message ?? "No se pudo subir el archivo al storage.");
-            }
-            originalPath = data.path;
-
-            // PREVIEW + THUMBNAIL with the watermark in the pixels → public "previews" bucket.
-            const variants = await uploadProtectedVariants(supabase, file, storagePath.replace(/\.[^./]+$/, ""));
-            previewPaths = variants.paths;
-
-            // image_url only records where the original lives (used by /api/download, which signs
-            // it after validating a purchase). It is not publicly readable once "photos" is private.
-            const imageUrl = supabase.storage.from(ORIGINALS_BUCKET).getPublicUrl(data.path).data.publicUrl;
-
-            const { error: insertError } = await supabase.from("photos").insert([
-              {
-                match_id: galleryId,
-                title: file.name,
-                sort_order: index,
-                price: parsePriceValue(form.price),
-                image_url: imageUrl,
-                watermark_url: variants.previewUrl,
-                thumbnail_url: variants.thumbnailUrl,
-                is_published: true,
-              },
-            ]);
-
-            if (insertError) {
-              throw new Error(insertError.message ?? "No se pudo registrar la foto en la base de datos.");
-            }
-
-            nextUploads.push({
-              name: file.name,
-              url: variants.thumbnailUrl,
-              uploaded: true,
-              note: "Subida con preview protegida",
-            });
-            successfulCount += 1;
-          } catch (error) {
-            if (previewPaths.length) {
-              await supabase.storage.from(PREVIEWS_BUCKET).remove(previewPaths).catch(() => undefined);
-            }
-            if (originalPath) {
-              await supabase.storage.from(ORIGINALS_BUCKET).remove([originalPath]).catch(() => undefined);
-            }
-            const fileError = error instanceof Error ? error.message : "Error desconocido";
-            failedFiles.push(`${file.name} (${fileError})`);
-            nextUploads.push({
-              name: file.name,
-              url: URL.createObjectURL(file),
-              uploaded: false,
-              note: fileError,
-            });
-          }
+    for (const [index, file] of filesToUpload.entries()) {
+      setStatusMessage(`Subiendo ${index + 1} de ${filesToUpload.length}: ${file.name}...`);
+      try {
+        const thumbnailUrl = await uploadPhoto(file, galleryId, index, price);
+        nextUploads.push({ name: file.name, url: thumbnailUrl, uploaded: true, note: "Subida con preview protegida" });
+        successfulCount += 1;
+      } catch (error) {
+        const fileError = error instanceof Error ? error.message : "Error desconocido";
+        failedFiles.push(`${file.name} (${fileError})`);
+        nextUploads.push({ name: file.name, url: URL.createObjectURL(file), uploaded: false, note: fileError });
+        if (error instanceof StorageFullError) {
+          stoppedForSpace = true;
+          break;
         }
-      } else {
-        for (const file of filesToUpload) {
-          failedFiles.push(file.name);
-          nextUploads.push({
-            name: file.name,
-            url: URL.createObjectURL(file),
-            uploaded: false,
-            note: "Supabase no configurado",
-          });
-        }
-      }
-    } catch (error) {
-      const fatalMessage = error instanceof Error ? error.message : "Error desconocido";
-      console.error("upload failed", error);
-      for (const file of filesToUpload) {
-        failedFiles.push(`${file.name} (${fatalMessage})`);
-        nextUploads.push({
-          name: file.name,
-          url: URL.createObjectURL(file),
-          uploaded: false,
-          note: fatalMessage,
-        });
       }
     }
 
     setUploads((prev) => [...nextUploads, ...prev]);
     setSelectedFiles([]);
-    if (successfulCount > 0) {
-      void loadAdminData();
-    }
+    void loadAdminData();
     setStatusMessage(
-      failedFiles.length > 0
-        ? `Se subieron ${successfulCount} de ${filesToUpload.length} fotos. Fallaron: ${failedFiles.join(", ")}.`
-        : `Se cargaron ${successfulCount} imagen${successfulCount !== 1 ? "es" : ""} correctamente.`,
+      stoppedForSpace
+        ? `Se subieron ${successfulCount} fotos. Se detuvo la carga: no hay espacio disponible. Eliminá un álbum anterior para liberar almacenamiento.`
+        : failedFiles.length > 0
+          ? `Se subieron ${successfulCount} de ${filesToUpload.length} fotos. Fallaron: ${failedFiles.join(", ")}.`
+          : `Se cargaron ${successfulCount} ${successfulCount === 1 ? "imagen" : "imágenes"} correctamente.`,
     );
     setIsUploading(false);
   };
+
+  // Archive / restore one or several albums through the server API (validated there).
+  const handleAlbumsArchive = async (albumIds: string[], archived: boolean) => {
+    if (!albumIds.length) return;
+    setIsAlbumBusy(true);
+    const failures: string[] = [];
+    for (const albumId of albumIds) {
+      try {
+        await adminApi(`/api/admin/albums/${albumId}`, { action: archived ? "archive" : "restore" });
+      } catch (error) {
+        const title = matches.find((match) => match.id === albumId)?.title ?? albumId;
+        failures.push(`${title} (${error instanceof Error ? error.message : "error"})`);
+      }
+    }
+    const done = albumIds.length - failures.length;
+    setStatusMessage(
+      `${archived ? "Archivadas" : "Restauradas como borrador"}: ${done} galería${done === 1 ? "" : "s"}.` +
+        (failures.length ? ` Fallaron: ${failures.join(", ")}.` : ""),
+    );
+    setSelectedAlbums(new Set());
+    setIsAlbumBusy(false);
+    await loadAdminData();
+  };
+
+  const handleDeletionClosed = async (changed: boolean) => {
+    const plan = deletionPlan;
+    setDeletionPlan(null);
+    if (!changed) return;
+    setSelectedAlbums(new Set());
+    if (plan?.kind === "albums" && photosPanel && plan.albumIds.includes(photosPanel.id)) {
+      setPhotosPanel(null);
+    } else {
+      setPhotosReloadKey((key) => key + 1);
+    }
+    await loadAdminData();
+  };
+
+  const toggleAlbum = (albumId: string) =>
+    setSelectedAlbums((current) => {
+      const next = new Set(current);
+      if (next.has(albumId)) next.delete(albumId);
+      else next.add(albumId);
+      return next;
+    });
+
+  const albumIsBusy = isUploading || isSavingGallery || isGeneratingHero || isAlbumBusy;
 
   if (isCheckingAuth) {
     return (
@@ -695,6 +564,8 @@ export default function AdminPage() {
           </button>
         </div>
 
+        <StorageIndicator reloadKey={storageReloadKey} />
+
         <div className="mb-8 grid gap-2 border border-white/10 bg-white/5 md:grid-cols-4">
           {stats.map((stat) => (
             <div key={stat.label} className="bg-[#111820] p-5">
@@ -756,6 +627,7 @@ export default function AdminPage() {
                 >
                   <option value="Publicada">Publicada</option>
                   <option value="Borrador">Borrador</option>
+                  {selectedGalleryId ? <option value="Archivada">Archivada</option> : null}
                 </select>
               </label>
             </div>
@@ -852,7 +724,7 @@ export default function AdminPage() {
 
             <button
               type="button"
-              disabled={isUploading || isGeneratingPreviews || !selectedGalleryId}
+              disabled={isUploading || !selectedGalleryId}
               onClick={handleUpload}
               className="mt-5 w-full bg-[#FFC94A] px-4 py-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-[#0B0F14] disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -861,37 +733,60 @@ export default function AdminPage() {
 
             <p className="mt-4 text-[12px] text-[#8A9A93]">{statusMessage}</p>
 
-            {pendingPreviews === null ? (
-              <p className="mt-4 border-t border-white/10 pt-4 text-[12px] text-[#fca5a5]">
-                No se pudo verificar la protección de imágenes. Aplicá la migración 20261003_protected_previews.sql.
-              </p>
-            ) : pendingPreviews > 0 ? (
-              <div className="mt-4 border-t border-white/10 pt-4">
-                <p className="text-[12px] text-[#F6D36F]">
-                  {pendingPreviews} foto{pendingPreviews === 1 ? "" : "s"} sin preview protegida.
-                </p>
-                <button
-                  type="button"
-                  disabled={isGeneratingPreviews || isUploading}
-                  onClick={() => void handleGenerateMissingPreviews()}
-                  className="mt-3 w-full border border-[#FFC94A]/60 px-4 py-2.5 text-[12px] font-semibold uppercase tracking-[0.08em] text-[#FFC94A] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isGeneratingPreviews ? "Generando..." : "Generar previews protegidas"}
-                </button>
-              </div>
-            ) : null}
           </div>
         </div>
 
         <div className="rounded-[5px] border border-white/10 bg-[#111820] p-6">
           <div className="mb-5 flex items-center justify-between gap-3">
             <h2 className="text-[16px] font-semibold text-[#F4F1E8]">Últimas galerías</h2>
+            {selectedAlbums.size ? (
+              <div className="flex flex-wrap items-center gap-4 text-[12.5px] text-[#8A9A93]">
+                <span>{selectedAlbums.size} seleccionada{selectedAlbums.size === 1 ? "" : "s"}</span>
+                <button
+                  type="button"
+                  disabled={albumIsBusy}
+                  onClick={() => void handleAlbumsArchive(Array.from(selectedAlbums), true)}
+                  className="hover:text-[#FFC94A] disabled:opacity-60"
+                >
+                  Archivar
+                </button>
+                <button
+                  type="button"
+                  disabled={albumIsBusy}
+                  onClick={() =>
+                    setDeletionPlan({
+                      kind: "albums",
+                      albumIds: Array.from(selectedAlbums),
+                      label: `${selectedAlbums.size} galería${selectedAlbums.size === 1 ? "" : "s"}`,
+                    })
+                  }
+                  className="text-[#F2994A] hover:text-[#EB5757] disabled:opacity-60"
+                >
+                  Eliminar
+                </button>
+                <button type="button" onClick={() => setSelectedAlbums(new Set())} className="hover:text-[#F4F1E8]">
+                  Quitar selección
+                </button>
+              </div>
+            ) : null}
           </div>
 
-          <div className="overflow-hidden rounded-[3px] border border-white/10">
-            <table className="w-full border-collapse">
+          <div className="overflow-x-auto rounded-[3px] border border-white/10">
+            <table className="w-full min-w-[640px] border-collapse">
               <thead>
                 <tr>
+                  <th className="w-10 border-b border-white/10 px-4 py-3 text-left">
+                    <input
+                      type="checkbox"
+                      aria-label="Seleccionar todas las galerías"
+                      checked={matches.length > 0 && matches.every((match) => match.id && selectedAlbums.has(match.id))}
+                      onChange={(event) =>
+                        setSelectedAlbums(
+                          event.target.checked ? new Set(matches.flatMap((match) => (match.id ? [match.id] : []))) : new Set(),
+                        )
+                      }
+                    />
+                  </th>
                   <th className="border-b border-white/10 px-4 py-3 text-left font-mono text-[10.5px] uppercase tracking-[0.08em] text-[#8A9A93]">Partido</th>
                   <th className="border-b border-white/10 px-4 py-3 text-left font-mono text-[10.5px] uppercase tracking-[0.08em] text-[#8A9A93]">Fotos</th>
                   <th className="border-b border-white/10 px-4 py-3 text-left font-mono text-[10.5px] uppercase tracking-[0.08em] text-[#8A9A93]">Estado</th>
@@ -903,26 +798,60 @@ export default function AdminPage() {
                 {matches.map((match) => (
                   <tr key={match.id ?? match.slug} className="border-b border-white/10 last:border-b-0">
                     <td className="px-4 py-5">
+                      {match.id ? (
+                        <input
+                          type="checkbox"
+                          aria-label={`Seleccionar ${match.title}`}
+                          checked={selectedAlbums.has(match.id)}
+                          onChange={() => toggleAlbum(match.id as string)}
+                        />
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-5">
                       <div className="font-semibold text-[#F4F1E8]">{match.title}</div>
                       <div className="mt-1 text-[12px] text-[#8A9A93]">{match.subtitle}</div>
                     </td>
                     <td className="px-4 py-5 text-[#F4F1E8]">{match.photos}</td>
                     <td className="px-4 py-5">
-                      <span className={`rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.05em] ${match.status === "Publicada" ? "border-[#6FCF97]/35 bg-[#6FCF97]/10 text-[#6FCF97]" : "border-white/10 bg-white/5 text-[#8A9A93]"}`}>
+                      <span className={`rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.05em] ${match.status === "Publicada" ? "border-[#6FCF97]/35 bg-[#6FCF97]/10 text-[#6FCF97]" : match.status === "Archivada" ? "border-[#FFC94A]/40 bg-[#FFC94A]/10 text-[#F6D36F]" : "border-white/10 bg-white/5 text-[#8A9A93]"}`}>
                         {match.status}
                       </span>
                     </td>
                     <td className="px-4 py-5 text-[#F4F1E8]">{match.vendas}</td>
                     <td className="px-4 py-5">
-                      <div className="flex gap-4 text-[12.5px] text-[#8A9A93]">
+                      <div className="flex flex-wrap gap-x-4 gap-y-2 text-[12.5px] text-[#8A9A93]">
                         <a href={match.slug ? `/galeria/${match.slug}` : "/galeria"} className="hover:text-[#FFC94A]">Ver</a>
                         <button
                           type="button"
-                          disabled={!match.id || isUploading || isSavingGallery || isGeneratingHero}
+                          disabled={!match.id || albumIsBusy}
                           onClick={() => match.id && void handleEditGallery(match.id)}
                           className="hover:text-[#FFC94A] disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           Editar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!match.id}
+                          onClick={() => match.id && setPhotosPanel({ id: match.id, title: match.title })}
+                          className="hover:text-[#FFC94A] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Fotos
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!match.id || albumIsBusy}
+                          onClick={() => match.id && void handleAlbumsArchive([match.id], match.status !== "Archivada")}
+                          className="hover:text-[#FFC94A] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {match.status === "Archivada" ? "Restaurar" : "Archivar"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!match.id || albumIsBusy}
+                          onClick={() => match.id && setDeletionPlan({ kind: "albums", albumIds: [match.id], label: `“${match.title}”` })}
+                          className="text-[#F2994A] hover:text-[#EB5757] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Eliminar
                         </button>
                       </div>
                     </td>
@@ -932,6 +861,19 @@ export default function AdminPage() {
             </table>
           </div>
         </div>
+
+        {photosPanel ? (
+          <AlbumPhotosPanel
+            key={photosPanel.id}
+            albumId={photosPanel.id}
+            albumTitle={photosPanel.title}
+            reloadKey={photosReloadKey}
+            onClose={() => setPhotosPanel(null)}
+            onDelete={setDeletionPlan}
+          />
+        ) : null}
+
+        {deletionPlan ? <DeletionModal plan={deletionPlan} onClose={(changed) => void handleDeletionClosed(changed)} /> : null}
 
         {uploads.length > 0 && (
           <div className="mt-8 rounded-[5px] border border-white/10 bg-[#111820] p-6">

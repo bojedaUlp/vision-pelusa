@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { downloadHref } from "@/lib/download-links";
+import { downloadDeadlineText, downloadExpired, downloadHref } from "@/lib/download-links";
 
 type PurchasedPhoto = {
   id: string;
@@ -11,6 +11,7 @@ type PurchasedPhoto = {
   title: string;
   previewUrl: string | null;
   unitPrice: number;
+  available: boolean;
 };
 
 type PaidPurchase = {
@@ -18,6 +19,7 @@ type PaidPurchase = {
   total: number;
   createdAt: string;
   paidAt: string | null;
+  downloadExpiresAt: string | null;
   photos: PurchasedPhoto[];
 };
 
@@ -101,6 +103,16 @@ export default function PurchaseDetailPage() {
               </span>
             </div>
 
+            <p
+              className={`mb-6 rounded-[4px] border px-4 py-3 text-[13px] ${
+                downloadExpired(purchase.downloadExpiresAt)
+                  ? "border-white/10 bg-white/5 text-[#8A9A93]"
+                  : "border-[#FFC94A]/25 bg-[#FFC94A]/10 text-[#F6D36F]"
+              }`}
+            >
+              {downloadDeadlineText(purchase.downloadExpiresAt)}
+            </p>
+
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {purchase.photos.map((photo) => (
                 <div key={photo.id} className="overflow-hidden rounded-[4px] border border-white/10 bg-[#111820]">
@@ -116,12 +128,16 @@ export default function PurchaseDetailPage() {
                     <div className="min-w-0 truncate text-[13px] text-[#F4F1E8]" title={photo.title}>
                       {photo.title}
                     </div>
-                    <a
-                      href={downloadHref(purchase.id, photo.id)}
-                      className="shrink-0 bg-[#FFC94A] px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.02em] text-[#0B0F14]"
-                    >
-                      Descargar original
-                    </a>
+                    {photo.available && !downloadExpired(purchase.downloadExpiresAt) ? (
+                      <a
+                        href={downloadHref(purchase.id, photo.id)}
+                        className="shrink-0 bg-[#FFC94A] px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.02em] text-[#0B0F14]"
+                      >
+                        Descargar original
+                      </a>
+                    ) : (
+                      <span className="shrink-0 text-[12px] text-[#8A9A93]">No disponible</span>
+                    )}
                   </div>
                 </div>
               ))}

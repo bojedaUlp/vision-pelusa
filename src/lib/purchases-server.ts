@@ -7,11 +7,14 @@ import { getPriceForCount } from "./mock-data";
 import {
   createMercadoPagoPreference,
   getMercadoPagoPayment,
+  getPreferenceExpirationHours,
   isValidPaymentId,
+  searchMercadoPagoPaymentsByReference,
 } from "./mercadopago";
 
-// Same window the previous webhook used for download links.
-const DOWNLOAD_ACCESS_DAYS = 7;
+// Download window after payment (shown to buyers). Albums are weekly: once every download right
+// of a photo expired, the admin may delete its files.
+export const DOWNLOAD_ACCESS_DAYS = 7;
 const MAX_PHOTOS_PER_PURCHASE = 200;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -129,7 +132,7 @@ export async function createCheckout(input: { email: unknown; photoIds: unknown 
   // ETAPA 1: fotos. Titles and existence come from the database, never from the browser.
   const { data: photos, error: photosError } = await supabase
     .from("photos")
-    .select("id, title, is_published")
+    .select("id, title, is_published, matches(status)")
     .in("id", photoIds);
 
   if (photosError) {
@@ -137,8 +140,17 @@ export async function createCheckout(input: { email: unknown; photoIds: unknown 
     throw new CheckoutStageError("PHOTOS", `Photos lookup failed: ${photosError.message}`);
   }
 
-  const photoRows = (photos ?? []) as Array<{ id: string; title: string; is_published: boolean }>;
-  if (photoRows.length !== photoIds.length || photoRows.some((photo) => !photo.is_published)) {
+  // Photos being deleted are unpublished; only published albums accept purchases (not drafts,
+  // archived or deleted). The purchase_items_guard trigger enforces the same rule atomically.
+  const photoRows = (photos ?? []) as unknown as Array<{
+    id: string;
+    title: string;
+    is_published: boolean;
+    matches: { status: string } | null;
+  }>;
+  const isBuyable = (photo: (typeof photoRows)[number]) =>
+    photo.is_published && photo.matches?.status === "published";
+  if (photoRows.length !== photoIds.length || !photoRows.every(isBuyable)) {
     console.error("[checkout] PHOTOS ERROR: requested", photoIds.length, "found", photoRows.length);
     throw new PurchaseFlowError("Alguna de las fotos seleccionadas ya no está disponible.");
   }
@@ -149,9 +161,11 @@ export async function createCheckout(input: { email: unknown; photoIds: unknown 
 
   // ETAPA 2: purchase pending.
   console.log("[checkout] creating purchase");
+  const expirationHours = getPreferenceExpirationHours();
+  const expiresAt = expirationHours ? new Date(Date.now() + expirationHours * 60 * 60 * 1000) : null;
   const { data: purchase, error: purchaseError } = await supabase
     .from("purchases")
-    .insert({ buyer_email: email, status: "pending", total_amount: total })
+    .insert({ buyer_email: email, status: "pending", total_amount: total, expires_at: expiresAt?.toISOString() ?? null })
     .select("id")
     .single();
 
@@ -179,6 +193,10 @@ export async function createCheckout(input: { email: unknown; photoIds: unknown 
   if (itemsError || (insertedItems ?? []).length !== itemRows.length) {
     console.error("[checkout] PURCHASE ITEMS ERROR:", itemsError ?? `inserted ${insertedItems?.length ?? 0} of ${itemRows.length}`);
     await supabase.from("purchases").delete().eq("id", purchaseId);
+    if (itemsError?.message?.includes("PHOTO_NOT_AVAILABLE")) {
+      // Lost the race against an admin deletion/archive: not a server failure.
+      throw new PurchaseFlowError("Alguna de las fotos seleccionadas ya no está disponible.");
+    }
     throw new CheckoutStageError(
       "PURCHASE_ITEMS",
       `Purchase items insert failed: ${itemsError?.message ?? `inserted ${insertedItems?.length ?? 0} of ${itemRows.length}`}`,
@@ -204,6 +222,7 @@ export async function createCheckout(input: { email: unknown; photoIds: unknown 
       backUrl: `${appUrl}/compras?email=${encodeURIComponent(email)}`,
       // Mercado Pago only accepts public https notification URLs.
       notificationUrl: appUrl.startsWith("https://") ? `${appUrl}/api/payments/webhook` : undefined,
+      expiresAt: expiresAt ?? undefined,
     });
   } catch (error) {
     console.error("[checkout] MERCADO PAGO ERROR:", describeError(error));
@@ -371,8 +390,9 @@ type PurchaseRow = {
     photo_id: string | null;
     unit_price: number;
     quantity: number;
-    photos: { id: string; title: string; image_url: string | null; watermark_url: string | null; sort_order: number } | null;
+    photos: { id: string; title: string; watermark_url: string | null; sort_order: number; status: string } | null;
   }>;
+  download_access: Array<{ photo_id: string | null; expires_at: string | null }> | null;
 };
 
 export type PurchasedPhoto = {
@@ -381,6 +401,8 @@ export type PurchasedPhoto = {
   title: string;
   previewUrl: string | null;
   unitPrice: number;
+  // false once the album was cleaned up after the download window.
+  available: boolean;
 };
 
 export type PaidPurchase = {
@@ -388,13 +410,15 @@ export type PaidPurchase = {
   total: number;
   createdAt: string;
   paidAt: string | null;
+  // Downloads are available until this date (null = no expiry recorded).
+  downloadExpiresAt: string | null;
   photos: PurchasedPhoto[];
 };
 
 const PURCHASE_SELECT =
-  "id, buyer_email, status, total_amount, created_at, paid_at, purchase_items(id, photo_id, unit_price, quantity, photos(id, title, image_url, watermark_url, sort_order))";
+  "id, buyer_email, status, total_amount, created_at, paid_at, purchase_items(id, photo_id, unit_price, quantity, photos(id, title, watermark_url, sort_order, status)), download_access(photo_id, expires_at)";
 
-// image_url (the original) is intentionally not exposed: originals only leave through /api/download.
+// The original's location is never exposed: originals only leave through /api/download.
 function toPaidPurchase(row: PurchaseRow): PaidPurchase {
   const photos = (row.purchase_items ?? [])
     .filter((item) => item.photo_id && item.photos)
@@ -405,20 +429,44 @@ function toPaidPurchase(row: PurchaseRow): PaidPurchase {
       title: item.photos?.title ?? `Foto ${index + 1}`,
       previewUrl: protectedImageUrl(item.photos?.watermark_url) ?? null,
       unitPrice: Number(item.unit_price ?? 0),
+      available: item.photos?.status === "active" || item.photos?.status === "pending_deletion",
     }));
+
+  const expiries = (row.download_access ?? []).map((access) => access.expires_at).filter((value): value is string => Boolean(value));
+  const downloadExpiresAt = expiries.length ? expiries.sort().at(-1) ?? null : null;
 
   return {
     id: row.id,
     total: Number(row.total_amount ?? 0),
     createdAt: row.created_at,
     paidAt: row.paid_at,
+    downloadExpiresAt,
     photos,
   };
 }
 
-export async function listPaidPurchasesByEmail(emailInput: unknown): Promise<PaidPurchase[]> {
+/**
+ * Knowing an email is not proof of owning it, and the result carries download links. The caller
+ * must also present the Mercado Pago operation number (payment id) of one paid purchase made
+ * with that email: it comes back in the return URL and in Mercado Pago's receipt. Same empty
+ * answer for "wrong pair" and "no purchases", so neither emails nor payment ids can be probed.
+ */
+export async function listPaidPurchasesByEmail(emailInput: unknown, paymentIdInput: unknown): Promise<PaidPurchase[]> {
   const email = normalizeEmail(emailInput);
-  if (!isValidEmail(email)) return [];
+  const paymentId = String(paymentIdInput ?? "").trim();
+  if (!isValidEmail(email) || !isValidPaymentId(paymentId)) return [];
+
+  const { data: proof, error: proofError } = await getSupabaseAdmin()
+    .from("purchases")
+    .select("id")
+    .ilike("buyer_email", escapeLike(email))
+    .eq("mercado_pago_payment_id", paymentId)
+    .eq("status", "paid")
+    .limit(1)
+    .maybeSingle();
+
+  if (proofError) fail("purchase ownership lookup failed", proofError);
+  if (!proof) return [];
 
   const { data, error } = await getSupabaseAdmin()
     .from("purchases")
@@ -451,23 +499,22 @@ export async function getPaidPurchase(purchaseId: unknown): Promise<PaidPurchase
 /* Downloads                                                                  */
 /* -------------------------------------------------------------------------- */
 
-const STORAGE_BUCKET = "photos";
+export type OriginalDownload = { body: ReadableStream; size: number; contentType: string; fileName: string };
 
-// image_url is stored as a Supabase Storage URL (public or signed). Recover the object path.
-function storagePathFromUrl(imageUrl: string): string | null {
-  try {
-    const url = new URL(imageUrl);
-    const match = url.pathname.match(/\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/);
-    if (!match || match[1] !== STORAGE_BUCKET) return null;
-    return decodeURIComponent(match[2]);
-  } catch {
-    // Not a URL: treat it as a raw object path inside the bucket.
-    const path = imageUrl.replace(/^\/+/, "");
-    return path && !path.includes("://") ? path : null;
-  }
-}
+const safeFileName = (title: string, photoId: string) => {
+  const base = title.replace(/[^\w.\- ]+/g, "_").trim() || photoId;
+  return /\.(jpe?g|png|webp|heic)$/i.test(base) ? base : `${base}.jpg`;
+};
 
-export async function getOriginalDownloadUrl(input: { purchaseId: unknown; photoId: unknown }): Promise<string> {
+/**
+ * Authorizes a purchased download and returns the ORIGINAL from the private R2 bucket. The original
+ * is streamed by the Worker; there is no public or signed URL to it.
+ */
+export async function getOriginalDownload(input: {
+  purchaseId: unknown;
+  photoId: unknown;
+  originals: { get(key: string): Promise<{ body: ReadableStream; size: number; httpMetadata?: { contentType?: string } } | null> };
+}): Promise<OriginalDownload> {
   const { purchaseId, photoId } = input;
   if (!isUuid(purchaseId) || !isUuid(photoId)) {
     throw new PurchaseFlowError("Solicitud de descarga inválida.", 400);
@@ -508,31 +555,98 @@ export async function getOriginalDownloadUrl(input: { purchaseId: unknown; photo
     throw new PurchaseFlowError("No hay acceso de descarga registrado para esta foto.", 403);
   }
   if (access.expires_at && new Date(access.expires_at).getTime() < Date.now()) {
-    throw new PurchaseFlowError("El acceso de descarga venció. Escribinos para renovarlo.", 410);
+    throw new PurchaseFlowError("El plazo de descarga de esta foto venció.", 410);
   }
 
   const { data: photo, error: photoError } = await supabase
     .from("photos")
-    .select("id, title, image_url")
+    .select("id, title, original_key, status")
     .eq("id", photoId)
     .maybeSingle();
   if (photoError) fail("download photo lookup failed", photoError);
-  if (!photo?.image_url) {
+  if (!photo?.original_key || photo.status === "deleted") {
+    throw new PurchaseFlowError("Esta foto ya no está disponible.", 410);
+  }
+
+  const object = await input.originals.get(photo.original_key);
+  if (!object) {
+    console.error("[download] original missing in R2", { photoId });
     throw new PurchaseFlowError("No encontramos el archivo original de esta foto.", 404);
   }
 
-  const storagePath = storagePathFromUrl(photo.image_url);
-  if (!storagePath) {
-    // Original hosted outside our bucket (e.g. seed data): hand out image_url as-is, never watermark_url.
-    return photo.image_url;
+  return {
+    body: object.body,
+    size: object.size,
+    contentType: object.httpMetadata?.contentType || "image/jpeg",
+    fileName: safeFileName(String(photo.title ?? ""), photo.id),
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reconciliation of unresolved purchases before deleting photos              */
+/* -------------------------------------------------------------------------- */
+
+const MP_PENDING_STATUSES = new Set(["pending", "in_process", "authorized", "in_mediation"]);
+const MAX_RECONCILE_PER_CALL = 20;
+const CHECKOUT_MAX_DURATION_MS = 60 * 60 * 1000;
+
+/**
+ * Photos linked to 'pending'/'failed' purchases stay protected. A purchase is released
+ * ('expired') only when Mercado Pago proves it can no longer be paid:
+ *   - it never got a preference (checkout failed before Mercado Pago), or
+ *   - its preference expired (purchases.expires_at passed) AND Mercado Pago has no approved
+ *     or in-progress payment for it.
+ * An approved payment found here is confirmed (the buyer gets the download, photo stays protected).
+ * Without preference expiration (MP_PREFERENCE_EXPIRATION_HOURS unset) a started checkout
+ * keeps protecting its photos: deleting them could leave a later payment without its photo.
+ */
+export async function reconcileUnresolvedPurchases(photoIds: string[]) {
+  if (!photoIds.length) return { checked: 0, released: 0, confirmed: 0 };
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from("purchase_items")
+    .select("purchase_id, purchases!inner(id, status, created_at, expires_at, mercado_pago_preference_id)")
+    .in("photo_id", photoIds)
+    .in("purchases.status", ["pending", "failed"]);
+  if (error) fail("unresolved purchases lookup failed", error);
+
+  type Row = {
+    purchases: { id: string; status: string; created_at: string; expires_at: string | null; mercado_pago_preference_id: string | null };
+  };
+  const purchases = new Map<string, Row["purchases"]>();
+  for (const row of (data ?? []) as unknown as Row[]) purchases.set(row.purchases.id, row.purchases);
+
+  let checked = 0;
+  let released = 0;
+  let confirmed = 0;
+  for (const purchase of purchases.values()) {
+    // A checkout in progress has no preference for a few seconds: only an old one is abandoned.
+    const neverReachedMercadoPago =
+      !purchase.mercado_pago_preference_id && Date.now() - new Date(purchase.created_at).getTime() > CHECKOUT_MAX_DURATION_MS;
+    const preferenceExpired = purchase.expires_at !== null && new Date(purchase.expires_at).getTime() <= Date.now();
+    if (!neverReachedMercadoPago && !preferenceExpired) continue;
+    if (checked >= MAX_RECONCILE_PER_CALL) break;
+    checked += 1;
+
+    if (!neverReachedMercadoPago) {
+      const payments = await searchMercadoPagoPaymentsByReference(purchase.id);
+      const approved = payments.find((payment) => payment.status === "approved");
+      if (approved) {
+        const result = await confirmPayment(String(approved.id));
+        if (result.state === "approved") confirmed += 1;
+        continue;
+      }
+      if (payments.some((payment) => MP_PENDING_STATUSES.has(payment.status))) continue;
+    }
+
+    const { error: updateError } = await supabase
+      .from("purchases")
+      .update({ status: "expired" })
+      .eq("id", purchase.id)
+      .in("status", ["pending", "failed"]);
+    if (updateError) fail("expire purchase failed", updateError);
+    released += 1;
   }
-
-  const fileName = storagePath.split("/").pop() || `${photo.id}.jpg`;
-  const { data: signed, error: signError } = await supabase.storage
-    .from(STORAGE_BUCKET)
-    .createSignedUrl(storagePath, 60, { download: fileName });
-
-  if (signError || !signed?.signedUrl) fail("createSignedUrl failed", signError);
-
-  return signed.signedUrl;
+  return { checked, released, confirmed };
 }

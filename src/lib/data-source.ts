@@ -47,6 +47,9 @@ const resolveMatchSlug = (slug: string) => {
   return legacyAlias ?? (normalizedKey || key);
 };
 
+// Archived and deleted albums are not public: they no longer resolve by link (PostgREST "in" list).
+const HIDDEN_ALBUM_STATUSES = "(archived,deleted)";
+
 const formatMatchCard = (match: any) => ({
   slug: String(match.id ?? match.slug ?? ""),
   tag: match.tag ?? (match.slug ? match.slug.replace(/-/g, " ") : "Partido"),
@@ -125,6 +128,7 @@ export async function getPublishedGalleries(input: { page: number; q: string; so
         : query.order("played_at", { ascending: input.sort === "oldest" });
 
     const { data, error, count } = await query
+      .eq("photos.is_published", true)
       .order("id", { ascending: true })
       .order("sort_order", { ascending: true, referencedTable: "photos" })
       .limit(1, { referencedTable: "photos" })
@@ -210,6 +214,7 @@ export async function getHomePageData() {
       .from("matches")
       .select(GALLERY_CARD_SELECT)
       .eq("status", "published")
+      .eq("photos.is_published", true)
       .order("played_at", { ascending: false })
       .order("sort_order", { ascending: true, referencedTable: "photos" })
       .limit(1, { referencedTable: "photos" })
@@ -292,8 +297,8 @@ export async function getMatchBySlug(slug: string): Promise<MatchSummary | undef
     const isUuidRoute = /^[0-9a-fA-F-]{36}$/.test(routeValue);
 
     const { data, error } = isUuidRoute
-      ? await supabase.from("matches").select("*").eq("id", routeValue).limit(1)
-      : await supabase.from("matches").select("*").eq("slug", routeValue).limit(1);
+      ? await supabase.from("matches").select("*").eq("id", routeValue).not("status", "in", HIDDEN_ALBUM_STATUSES).limit(1)
+      : await supabase.from("matches").select("*").eq("slug", routeValue).not("status", "in", HIDDEN_ALBUM_STATUSES).limit(1);
 
     if (error) {
       console.error("getMatchBySlug failed", error);
@@ -349,8 +354,8 @@ export async function getPhotosByMatchSlug(slug: string): Promise<ProductPhoto[]
     const isUuidRoute = /^[0-9a-fA-F-]{36}$/.test(routeValue);
 
     const { data: matchData, error: matchError } = isUuidRoute
-      ? await supabase.from("matches").select("id, slug").eq("id", routeValue).limit(1)
-      : await supabase.from("matches").select("id, slug").eq("slug", routeValue).limit(1);
+      ? await supabase.from("matches").select("id, slug").eq("id", routeValue).not("status", "in", HIDDEN_ALBUM_STATUSES).limit(1)
+      : await supabase.from("matches").select("id, slug").eq("slug", routeValue).not("status", "in", HIDDEN_ALBUM_STATUSES).limit(1);
 
     if (matchError) {
       console.error("getPhotosByMatchSlug match lookup failed", matchError);
@@ -367,6 +372,8 @@ export async function getPhotosByMatchSlug(slug: string): Promise<ProductPhoto[]
       .from("photos")
       .select("id, match_id, title, sort_order, price, watermark_url, thumbnail_url, is_published")
       .eq("match_id", match.id)
+      // Photos being deleted or deleted are unpublished: never listed or offered for sale.
+      .eq("is_published", true)
       .order("sort_order", { ascending: true });
 
     if (error) {
@@ -440,6 +447,7 @@ export async function getAdminData() {
       supabase
         .from("matches")
         .select("id, slug, title, subtitle, venue, played_at, status")
+        .neq("status", "deleted")
         .order("played_at", { ascending: false }),
       supabase
         .from("photos")
@@ -500,7 +508,7 @@ export async function getAdminData() {
         year: "numeric",
       })}`,
       photos: Number(photosByMatch.get(String(match.id)) ?? 0),
-      status: match.status === "published" ? "Publicada" : "Borrador",
+      status: match.status === "published" ? "Publicada" : match.status === "archived" ? "Archivada" : "Borrador",
       vendas: Number(salesByMatch.get(String(match.id)) ?? 0),
     }));
 

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { getMatchBySlug, getPhotosByMatchSlug } from "@/lib/data-source";
 import { getPriceForCount } from "@/lib/mock-data";
+import { DOWNLOAD_WINDOW_DAYS } from "@/lib/download-links";
 
 export default function GalleryPage() {
   const params = useParams<{ slug: string }>();
@@ -396,6 +397,10 @@ export default function GalleryPage() {
               >
                 {isPaying ? "Procesando..." : "Pagar con Mercado Pago"}
               </button>
+
+              <p className="mt-3 text-[11.5px] text-[#8A9A93]">
+                Después del pago tenés {DOWNLOAD_WINDOW_DAYS} días para descargar tus fotos en alta calidad.
+              </p>
 
               {checkoutMessage ? (
                 <div className="mt-3 rounded-[3px] border border-[#FFC94A]/30 bg-[#FFC94A]/10 px-3 py-2 text-[12px] text-[#F4D582]">

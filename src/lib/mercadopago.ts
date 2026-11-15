@@ -1,6 +1,7 @@
 import "server-only";
 
-const MP_API = "https://api.mercadopago.com";
+// Overridable ONLY for local tests (a mock server). Never set MERCADO_PAGO_API_URL in production.
+const MP_API = (process.env.MERCADO_PAGO_API_URL ?? "").trim().replace(/\/+$/, "") || "https://api.mercadopago.com";
 
 export type MercadoPagoPayment = {
   id: number;
@@ -21,6 +22,8 @@ export type MercadoPagoPreferenceInput = {
   metadata: Record<string, string>;
   backUrl: string;
   notificationUrl?: string;
+  // When set, Mercado Pago rejects new payments for this preference after this date.
+  expiresAt?: Date;
 };
 
 function getAccessToken() {
@@ -33,6 +36,13 @@ function getAccessToken() {
 
 export function isValidPaymentId(value: unknown): value is string {
   return typeof value === "string" && /^\d{1,30}$/.test(value);
+}
+
+// Preference expiration in hours (MP_PREFERENCE_EXPIRATION_HOURS). Disabled (null) by default:
+// enabling it is a commercial decision. Without it, abandoned checkouts keep protecting photos.
+export function getPreferenceExpirationHours(): number | null {
+  const hours = Number(process.env.MP_PREFERENCE_EXPIRATION_HOURS);
+  return Number.isFinite(hours) && hours > 0 ? hours : null;
 }
 
 /**
@@ -58,6 +68,23 @@ export async function getMercadoPagoPayment(paymentId: string): Promise<MercadoP
   return (await response.json()) as MercadoPagoPayment;
 }
 
+// All payments Mercado Pago has for one purchase (external_reference = purchases.id).
+// Throws on failure: an outage must never be read as "no payments".
+export async function searchMercadoPagoPaymentsByReference(externalReference: string): Promise<MercadoPagoPayment[]> {
+  const url = `${MP_API}/v1/payments/search?external_reference=${encodeURIComponent(externalReference)}&limit=100`;
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${getAccessToken()}` },
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`Mercado Pago payments search falló (${response.status}): ${detail}`);
+  }
+  const data = (await response.json()) as { results?: MercadoPagoPayment[] };
+  return Array.isArray(data.results) ? data.results : [];
+}
+
 export async function createMercadoPagoPreference(input: MercadoPagoPreferenceInput) {
   const response = await fetch(`${MP_API}/checkout/preferences`, {
     method: "POST",
@@ -77,6 +104,14 @@ export async function createMercadoPagoPreference(input: MercadoPagoPreferenceIn
       },
       auto_return: "approved",
       ...(input.notificationUrl ? { notification_url: input.notificationUrl } : {}),
+      ...(input.expiresAt
+        ? {
+            expires: true,
+            expiration_date_from: new Date().toISOString(),
+            expiration_date_to: input.expiresAt.toISOString(),
+            date_of_expiration: input.expiresAt.toISOString(),
+          }
+        : {}),
     }),
   });
 

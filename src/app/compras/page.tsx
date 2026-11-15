@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { downloadHref } from "@/lib/download-links";
+import { downloadDeadlineText, downloadExpired, downloadHref } from "@/lib/download-links";
 
 type PurchasedPhoto = {
   id: string;
@@ -9,6 +9,7 @@ type PurchasedPhoto = {
   title: string;
   previewUrl: string | null;
   unitPrice: number;
+  available: boolean;
 };
 
 type PaidPurchase = {
@@ -16,6 +17,7 @@ type PaidPurchase = {
   total: number;
   createdAt: string;
   paidAt: string | null;
+  downloadExpiresAt: string | null;
   photos: PurchasedPhoto[];
 };
 
@@ -35,14 +37,17 @@ const formatDate = (value: string | null) =>
 
 export default function ComprasPage() {
   const [query, setQuery] = useState("");
+  // Mercado Pago operation number: proves the email belongs to the buyer (see /api/purchases).
+  const [operation, setOperation] = useState("");
   const [searchedEmail, setSearchedEmail] = useState("");
   const [purchaseData, setPurchaseData] = useState<PaidPurchase[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [paymentState, setPaymentState] = useState<PaymentState>("idle");
 
-  const fetchPurchasesForEmail = async (email: string) => {
+  const fetchPurchasesForEmail = async (email: string, paymentId: string) => {
     const trimmed = email.trim();
+    const operationNumber = paymentId.replace(/\D/g, "");
     setSearchedEmail(trimmed);
     setLookupError(null);
 
@@ -51,9 +56,18 @@ export default function ComprasPage() {
       return;
     }
 
+    if (!operationNumber) {
+      setPurchaseData([]);
+      setLookupError("Ingresá también el número de operación de Mercado Pago que figura en tu comprobante.");
+      return;
+    }
+
     setIsSearching(true);
     try {
-      const response = await fetch(`/api/purchases?email=${encodeURIComponent(trimmed)}`, { cache: "no-store" });
+      const response = await fetch(
+        `/api/purchases?email=${encodeURIComponent(trimmed)}&paymentId=${encodeURIComponent(operationNumber)}`,
+        { cache: "no-store" },
+      );
       const payload = await response.json();
 
       if (!response.ok || !payload?.ok) {
@@ -79,6 +93,7 @@ export default function ComprasPage() {
     const paymentId = searchParams.get("payment_id") ?? searchParams.get("collection_id") ?? "";
 
     if (emailFromUrl) setQuery(emailFromUrl);
+    if (paymentId && paymentId !== "null") setOperation(paymentId);
 
     const run = async () => {
       if (paymentId && paymentId !== "null") {
@@ -99,8 +114,8 @@ export default function ComprasPage() {
         }
       }
 
-      if (emailFromUrl) {
-        await fetchPurchasesForEmail(emailFromUrl);
+      if (emailFromUrl && paymentId && paymentId !== "null") {
+        await fetchPurchasesForEmail(emailFromUrl, paymentId);
       }
     };
 
@@ -108,7 +123,7 @@ export default function ComprasPage() {
   }, []);
 
   const handleSearch = async () => {
-    await fetchPurchasesForEmail(query);
+    await fetchPurchasesForEmail(query, operation);
   };
 
   const hasResults = purchaseData.length > 0;
@@ -134,10 +149,11 @@ export default function ComprasPage() {
           <div className="mono mb-4 text-[11px] uppercase tracking-[0.18em] text-[#FFC94A]">Acceso a compras</div>
           <h1 className="text-[clamp(26px,4vw,36px)] font-semibold text-[#F4F1E8]">Mis fotos</h1>
           <p className="mx-auto mt-3 max-w-[560px] text-[14.5px] text-[#8A9A93]">
-            Ingresá el email que usaste al pagar para volver a descargar tus fotos en alta calidad.
+            Ingresá el email que usaste al pagar y el número de operación de Mercado Pago (figura en tu
+            comprobante) para volver a descargar tus fotos en alta calidad.
           </p>
 
-          <div className="mx-auto mt-8 flex max-w-[440px] gap-3">
+          <div className="mx-auto mt-8 flex max-w-[440px] flex-wrap gap-3">
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -147,6 +163,17 @@ export default function ComprasPage() {
               type="email"
               className="field-input flex-1"
               placeholder="tu@email.com"
+            />
+            <input
+              value={operation}
+              onChange={(event) => setOperation(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void handleSearch();
+              }}
+              inputMode="numeric"
+              aria-label="Número de operación de Mercado Pago"
+              className="field-input min-w-[160px] flex-1"
+              placeholder="N° de operación"
             />
             <button
               type="button"
@@ -196,6 +223,11 @@ export default function ComprasPage() {
                       <div className="mt-2 text-[12.5px] text-[#8A9A93]">
                         Pago confirmado · {photoCount} {photoCount === 1 ? "foto descargable" : "fotos descargables"}
                       </div>
+                      <div
+                        className={`mt-1 text-[12.5px] ${downloadExpired(purchase.downloadExpiresAt) ? "text-[#8A9A93]" : "text-[#F6D36F]"}`}
+                      >
+                        {downloadDeadlineText(purchase.downloadExpiresAt)}
+                      </div>
                     </div>
                     <span className="rounded-full border border-[#6FCF97]/35 bg-[#6FCF97]/10 px-3 py-1 font-mono text-[10.5px] uppercase tracking-[0.05em] text-[#6FCF97]">
                       ✓ Pagado
@@ -225,12 +257,14 @@ export default function ComprasPage() {
                       <a href={detailHref} className="border border-white/10 bg-transparent px-3 py-2 text-[12.5px] text-[#F4F1E8]">
                         Ver fotos
                       </a>
-                      <a
-                        href={singlePhoto ? downloadHref(purchase.id, singlePhoto.id) : detailHref}
-                        className="bg-[#FFC94A] px-4 py-2 text-[12.5px] font-semibold uppercase tracking-[0.02em] text-[#0B0F14]"
-                      >
-                        {singlePhoto ? "Descargar original" : "Descargar originales"}
-                      </a>
+                      {downloadExpired(purchase.downloadExpiresAt) ? null : (
+                        <a
+                          href={singlePhoto ? downloadHref(purchase.id, singlePhoto.id) : detailHref}
+                          className="bg-[#FFC94A] px-4 py-2 text-[12.5px] font-semibold uppercase tracking-[0.02em] text-[#0B0F14]"
+                        >
+                          {singlePhoto ? "Descargar original" : "Descargar originales"}
+                        </a>
+                      )}
                     </div>
                   </div>
                 </div>
