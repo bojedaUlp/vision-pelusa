@@ -46,7 +46,7 @@ describe("reconcileUnresolvedPurchases", () => {
 
   it("keeps protecting an expired preference that still has a payment in process (late credit)", async () => {
     const t = await load(
-      { status: "pending", created_at: hourAgo(100), expires_at: hourAgo(1), mercado_pago_preference_id: "p1" },
+      { status: "pending", created_at: hourAgo(100), expires_at: hourAgo(25), mercado_pago_preference_id: "p1" },
       [{ id: 1, status: "in_process" }],
     );
     expect(await t.reconcile(["x"])).toMatchObject({ released: 0 });
@@ -55,11 +55,20 @@ describe("reconcileUnresolvedPurchases", () => {
 
   it("releases an expired preference with no approved or in-process payment", async () => {
     const t = await load(
-      { status: "failed", created_at: hourAgo(100), expires_at: hourAgo(1), mercado_pago_preference_id: "p1" },
+      { status: "failed", created_at: hourAgo(100), expires_at: hourAgo(25), mercado_pago_preference_id: "p1" },
       [{ id: 1, status: "rejected" }],
     );
     expect(await t.reconcile(["x"])).toMatchObject({ released: 1 });
     expect(t.updates).toEqual([{ status: "expired" }]);
+  });
+
+  it("waits 24 h after the preference expired before releasing (late credits of cash payments)", async () => {
+    const t = await load(
+      { status: "pending", created_at: hourAgo(80), expires_at: hourAgo(8), mercado_pago_preference_id: "p1" },
+      [],
+    );
+    expect(await t.reconcile(["x"])).toMatchObject({ released: 0 });
+    expect(t.search).not.toHaveBeenCalled();
   });
 
   it("releases an old checkout that never reached Mercado Pago, but not one in progress", async () => {

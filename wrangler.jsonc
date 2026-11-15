@@ -41,6 +41,8 @@
   ],
   "vars": {
     // Operational storage budget in bytes (8 GB, below R2's free 10 GB-month).
-    "STORAGE_BUDGET_BYTES": "8000000000"
+    "STORAGE_BUDGET_BYTES": "8000000000",
+    // Mercado Pago preferences (and cash tickets) expire 72 h after checkout. Approved 2026-11-15.
+    "MP_PREFERENCE_EXPIRATION_HOURS": "72"
   }
 }

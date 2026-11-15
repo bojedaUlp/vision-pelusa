@@ -18,7 +18,13 @@ done
 run() { docker exec -i "$NAME" psql -U postgres -v ON_ERROR_STOP=1 -q "$@"; }
 apply() { echo "→ $(basename "$1")"; run < "$1" >/dev/null; }
 
-apply "$DIR/00_supabase_stub.sql"
+if [[ "${VP_STRICT_GRANTS:-}" == "1" ]]; then
+  # Simulates a project that does NOT expose new tables automatically: schema.sql must grant explicitly.
+  echo "→ 00_supabase_stub.sql (sin privilegios por defecto)"
+  grep -v "alter default privileges" "$DIR/00_supabase_stub.sql" | run >/dev/null
+else
+  apply "$DIR/00_supabase_stub.sql"
+fi
 apply "$DIR/../schema.sql"
 
 echo "→ 10_schema.test.sql"

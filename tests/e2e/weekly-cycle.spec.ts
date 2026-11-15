@@ -163,8 +163,12 @@ test("4. purchase → Mercado Pago confirmation → authorized download of the o
   await page.getByRole("button", { name: "Pagar con Mercado Pago" }).click();
   await page.waitForURL(/mock_preference=/);
 
-  const { data: purchase } = await supabase.from("purchases").select("id, status").eq("buyer_email", buyerEmail).single();
+  const { data: purchase } = await supabase.from("purchases").select("id, status, expires_at").eq("buyer_email", buyerEmail).single();
   expect(purchase!.status).toBe("pending");
+  // MP_PREFERENCE_EXPIRATION_HOURS=72: the preference (and its cash tickets) expire in 72 h.
+  const hoursLeft = (new Date(purchase!.expires_at).getTime() - Date.now()) / 3600_000;
+  expect(hoursLeft).toBeGreaterThan(71.5);
+  expect(hoursLeft).toBeLessThanOrEqual(72);
   paidPurchaseId = purchase!.id;
 
   const pay = await request.post(`${env("E2E_MP_URL")}/__test/pay`, { data: { external_reference: paidPurchaseId, status: "approved" } });
@@ -245,7 +249,7 @@ test("7. deleting the album with an active download and a pending payment archiv
 test("8. after the download window and the payment expire, the album is fully deleted and storage freed", async ({ request }) => {
   await supabase.from("download_access").update({ expires_at: new Date(Date.now() - 60_000).toISOString() }).eq("purchase_id", paidPurchaseId);
   // Simulates an expired Mercado Pago preference with no payment (the mock has none for it).
-  await supabase.from("purchases").update({ expires_at: new Date(Date.now() - 60_000).toISOString() }).eq("id", pendingPurchaseId);
+  await supabase.from("purchases").update({ expires_at: new Date(Date.now() - 25 * 3600_000).toISOString() }).eq("id", pendingPurchaseId); // expired + 24 h grace
 
   await admin.reload();
   await admin.getByRole("row", { name: new RegExp(`E2E Fecha ${runId}`) }).getByRole("button", { name: "Eliminar" }).click();

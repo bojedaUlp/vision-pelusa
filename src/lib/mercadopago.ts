@@ -38,8 +38,16 @@ export function isValidPaymentId(value: unknown): value is string {
   return typeof value === "string" && /^\d{1,30}$/.test(value);
 }
 
-// Preference expiration in hours (MP_PREFERENCE_EXPIRATION_HOURS). Disabled (null) by default:
-// enabling it is a commercial decision. Without it, abandoned checkouts keep protecting photos.
+// Mercado Pago documents dates as ISO 8601 with an explicit offset ("2020-05-30T23:59:59.000-04:00")
+// and never shows UTC "Z". Argentina is UTC-03:00 all year (no DST).
+export function formatMercadoPagoDate(date: Date) {
+  const local = new Date(date.getTime() - 3 * 60 * 60 * 1000);
+  return `${local.toISOString().slice(0, 23)}-03:00`;
+}
+
+// Preference expiration in hours (MP_PREFERENCE_EXPIRATION_HOURS, 72 in wrangler.jsonc).
+// Mercado Pago recommends at least 3 days for cash payments (crediting can take 2 business hours).
+// Without it, abandoned checkouts keep protecting photos.
 export function getPreferenceExpirationHours(): number | null {
   const hours = Number(process.env.MP_PREFERENCE_EXPIRATION_HOURS);
   return Number.isFinite(hours) && hours > 0 ? hours : null;
@@ -107,9 +115,10 @@ export async function createMercadoPagoPreference(input: MercadoPagoPreferenceIn
       ...(input.expiresAt
         ? {
             expires: true,
-            expiration_date_from: new Date().toISOString(),
-            expiration_date_to: input.expiresAt.toISOString(),
-            date_of_expiration: input.expiresAt.toISOString(),
+            expiration_date_from: formatMercadoPagoDate(new Date()),
+            expiration_date_to: formatMercadoPagoDate(input.expiresAt),
+            // Cash tickets (Rapipago / Pago Fácil) expire together with the preference.
+            date_of_expiration: formatMercadoPagoDate(input.expiresAt),
           }
         : {}),
     }),

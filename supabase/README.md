@@ -15,16 +15,34 @@ fotos. Esta guía arranca con todo vacío: sin álbumes, fotos ni compras anteri
 1. Creá el proyecto en una organización **sin facturas pendientes ni restricciones**. La organización
    anterior quedó restringida por exceder el plan gratuito; si la del proyecto viejo muestra avisos de
    facturación, usá una organización nueva.
-2. **SQL Editor** → pegá el contenido de `supabase/schema.sql` → **Run**. Tiene que terminar sin errores.
+2. Aplicá el esquema de una de estas dos formas:
+   - **Por CLI (recomendado):** completá `.env.production.local` (ver más abajo) y ejecutá
+     `bash scripts/init-supabase.sh --check` y luego `--apply`. El script solo acepta el proyecto
+     `sigjpwmbcefapjaopuxr` y se niega a correr si el esquema ya existe.
+   - **A mano:** **SQL Editor** → pegá el contenido de `supabase/schema.sql` → **Run**. Tiene que
+     terminar sin errores.
 3. **Authentication → Sign In / Providers → Email**: desactivá *Allow new users to sign up*. Solo el
    administrador tiene cuenta; los compradores no necesitan una.
 4. **Authentication → Users → Add user → Create new user**: cargá el email y una contraseña fuerte del
    administrador, con *Auto Confirm User* marcado.
-5. **SQL Editor**:
+5. Marcalo como administrador con `bash scripts/init-supabase.sh --promote-admin EMAIL-DEL-ADMIN`, o
+   desde el **SQL Editor**:
    ```sql
    update public.profiles set is_admin = true where email = 'EMAIL-DEL-ADMIN';
    select email, is_admin from public.profiles;  -- verificar: is_admin = true
    ```
+
+**Credenciales locales para los scripts.** Van en `.env.production.local`, en la raíz del repo. Git lo
+ignora y los scripts nunca imprimen su contenido:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=https://sigjpwmbcefapjaopuxr.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<Project Settings → API Keys → publishable / anon>
+SUPABASE_SERVICE_ROLE_KEY=<Project Settings → API Keys → secret / service_role>
+SUPABASE_DB_URL=<botón Connect → Session pooler → URI, con la contraseña de la base>
+```
+
+Para verificar la configuración: `node scripts/verify-supabase.mjs`.
 6. **Project Settings → API**: copiá la *Project URL*, la clave *anon/publishable* y la clave
    *service_role/secret*. La service_role **nunca** se publica ni se carga como `NEXT_PUBLIC_`.
 
@@ -62,8 +80,7 @@ Los bindings `ORIGINALS_BUCKET` y `MEDIA_BUCKET` y la variable `STORAGE_BUDGET_B
 Restricciones:
 
 - **No** definas `MERCADO_PAGO_API_URL`: existe solo para las pruebas locales.
-- `MP_PREFERENCE_EXPIRATION_HOURS` queda **sin definir** hasta que se apruebe el vencimiento de las
-  preferencias de pago (ver "Pagos pendientes").
+- `MP_PREFERENCE_EXPIRATION_HOURS=72` ya está en `wrangler.jsonc` (aprobado). No hace falta cargarlo.
 
 ## 4. Mercado Pago
 
@@ -88,8 +105,9 @@ Mergeá a `main` y hacé push: Workers Builds compila y despliega. Después veri
 - Una foto con un pago **pendiente o rechazado** sigue protegida, porque Mercado Pago permite reintentar
   el pago con la misma preferencia. Esa protección se libera solo cuando la compra nunca llegó a Mercado
   Pago, o cuando su preferencia venció y Mercado Pago confirma que no hay pagos aprobados ni en proceso.
-- Sin vencimiento de preferencias (`MP_PREFERENCE_EXPIRATION_HOURS`), un checkout abandonado protege sus
-  fotos por tiempo indefinido. **Recomendación:** 72 h.
+- Las preferencias vencen a las **72 h**, igual que los tickets de efectivo (Rapipago / Pago Fácil):
+  Mercado Pago recomienda al menos 3 días para pagos en efectivo. Una compra vencida se libera recién
+  **24 h después** del vencimiento, y solo si Mercado Pago no muestra pagos aprobados ni en proceso.
 
 ## Pruebas
 

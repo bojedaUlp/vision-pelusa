@@ -48,6 +48,7 @@ const runtimeVars: Record<string, string> = {
   MERCADO_PAGO_ACCESS_TOKEN: "TEST-local-e2e",
   MERCADO_PAGO_API_URL: e2e.mpUrl,
   STORAGE_BUDGET_BYTES: String(e2e.budgetBytes),
+  MP_PREFERENCE_EXPIRATION_HOURS: "72",
 };
 const workersCommand = [
   `npx wrangler dev --port ${PORT} --ip 127.0.0.1 --local`,
@@ -76,6 +77,7 @@ export default defineConfig({
       MERCADO_PAGO_ACCESS_TOKEN: "TEST-local-e2e",
       MERCADO_PAGO_API_URL: e2e.mpUrl,
       STORAGE_BUDGET_BYTES: String(e2e.budgetBytes),
+      MP_PREFERENCE_EXPIRATION_HOURS: "72",
       NEXT_PUBLIC_MEDIA_URL: "",
     },
   },

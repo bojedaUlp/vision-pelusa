@@ -209,6 +209,7 @@ do $$ begin
   begin
     perform 1 from public.purchases limit 1;
     if found then raise exception 'FAIL: anon reads purchases'; end if;
+  exception when insufficient_privilege then null; -- even stricter: no grant at all
   end;
 end $$;
 commit;
@@ -233,7 +234,10 @@ do $$ begin
   if exists (select 1 from public.matches where id = '10000000-0000-4000-8000-000000000004') then
     raise exception 'FAIL: non-admin user sees drafts';
   end if;
-  update public.profiles set is_admin = true where id = '00000000-0000-4000-8000-0000000000b2';
+  begin
+    update public.profiles set is_admin = true where id = '00000000-0000-4000-8000-0000000000b2';
+  exception when insufficient_privilege then null; -- even stricter: no UPDATE grant at all
+  end;
   if (select is_admin from public.profiles where id = '00000000-0000-4000-8000-0000000000b2') then
     raise exception 'FAIL: a user promoted their own profile to admin';
   end if;

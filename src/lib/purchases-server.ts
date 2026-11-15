@@ -589,6 +589,9 @@ export async function getOriginalDownload(input: {
 const MP_PENDING_STATUSES = new Set(["pending", "in_process", "authorized", "in_mediation"]);
 const MAX_RECONCILE_PER_CALL = 20;
 const CHECKOUT_MAX_DURATION_MS = 60 * 60 * 1000;
+// A payment made right before the preference expired may be credited later (Mercado Pago does not
+// document this case); wait this long after expiration before releasing the purchase.
+export const EXPIRED_PREFERENCE_GRACE_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Photos linked to 'pending'/'failed' purchases stay protected. A purchase is released
@@ -624,7 +627,8 @@ export async function reconcileUnresolvedPurchases(photoIds: string[]) {
     // A checkout in progress has no preference for a few seconds: only an old one is abandoned.
     const neverReachedMercadoPago =
       !purchase.mercado_pago_preference_id && Date.now() - new Date(purchase.created_at).getTime() > CHECKOUT_MAX_DURATION_MS;
-    const preferenceExpired = purchase.expires_at !== null && new Date(purchase.expires_at).getTime() <= Date.now();
+    const preferenceExpired =
+      purchase.expires_at !== null && new Date(purchase.expires_at).getTime() + EXPIRED_PREFERENCE_GRACE_MS <= Date.now();
     if (!neverReachedMercadoPago && !preferenceExpired) continue;
     if (checked >= MAX_RECONCILE_PER_CALL) break;
     checked += 1;

@@ -327,6 +327,16 @@ create policy "purchases_select_admin" on public.purchases for select to authent
 create policy "purchase_items_select_admin" on public.purchase_items for select to authenticated using (public.is_admin());
 create policy "download_access_select_admin" on public.download_access for select to authenticated using (public.is_admin());
 
+-- Explicit API grants (newer Supabase projects may not expose new tables automatically).
+-- RLS above still decides which rows each role sees.
+grant usage on schema public to anon, authenticated, service_role;
+grant all on all tables in schema public to service_role;
+grant select on public.matches to anon, authenticated;
+grant insert, update on public.matches to authenticated;
+grant select on public.profiles to authenticated;
+grant select on public.purchases, public.purchase_items, public.download_access to authenticated;
+grant execute on function public.is_admin() to anon, authenticated;
+
 -- The private original location is never readable from the browser (column-level grant; a
 -- column REVOKE alone would not override Supabase's default table-level grant).
 revoke select on public.photos from anon, authenticated;
