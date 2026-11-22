@@ -19,7 +19,7 @@ const MAX_UPLOAD_BATCH = 100;
 
 class StorageFullError extends Error {}
 
-type UploadTarget = { url: string; direct: boolean; contentType: string };
+type UploadTarget = { url: string; direct: boolean; contentType: string; headers: Record<string, string> };
 
 // Sends one file to where the server said: straight to R2 with a presigned URL (no credentials in
 // the browser, the bytes never pass through the Worker) or, if direct uploads are not configured,
@@ -31,8 +31,11 @@ async function sendFile(target: UploadTarget, body: Blob) {
         await adminUpload(target.url, body, target.contentType);
         return;
       }
-      const response = await fetch(target.url, { method: "PUT", headers: { "Content-Type": target.contentType }, body });
-      if (response.ok) return;
+      // Exactly the signed headers (content type + If-None-Match: *, so nothing can be overwritten).
+      const response = await fetch(target.url, { method: "PUT", headers: target.headers, body });
+      // 412 = the file is already stored (an earlier attempt succeeded but its response was lost).
+      // The server's "complete" step verifies size and type of what is really in R2.
+      if (response.ok || response.status === 412) return;
       const error = new Error(`El almacenamiento rechazó el archivo (HTTP ${response.status}).`);
       if (response.status < 500 || attempt >= 3) throw error; // 4xx (e.g. expired URL) is not retried
     } catch (error) {

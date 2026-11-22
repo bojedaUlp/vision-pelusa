@@ -7,7 +7,7 @@ import { createClient } from "@supabase/supabase-js";
 
 if (existsSync(".env.production.local")) {
   for (const line of readFileSync(".env.production.local", "utf8").split(/\r?\n/)) {
-    const match = line.match(/^([A-Z_]+)=["']?(.*?)["']?$/);
+    const match = line.match(/^([A-Z0-9_]+)=["']?(.*?)["']?$/);
     if (match && !process.env[match[1]]) process.env[match[1]] = match[2];
   }
 }

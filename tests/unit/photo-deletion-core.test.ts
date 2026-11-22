@@ -67,11 +67,23 @@ describe("storageTargetsForPhoto", () => {
     ]);
   });
 
-  it("never targets keys of another album or external URLs", () => {
+  it("never targets keys of another album or external URLs (only the photo's own derived keys)", () => {
     const targets = storageTargetsForPhoto(
       photo({ original_key: `${OTHER}/${PHOTO}`, watermark_url: "https://x.test/a.jpg", thumbnail_url: `/media/${OTHER}/t.jpg` }),
     );
-    expect(targets).toEqual([]);
+    expect(targets).toEqual([
+      { bucket: "media", key: `${MATCH}/${PHOTO}-preview.jpg`, photoId: PHOTO },
+      { bucket: "media", key: `${MATCH}/${PHOTO}-thumb.jpg`, photoId: PHOTO },
+    ]);
+    expect(targets.every((t) => t.key.startsWith(`${MATCH}/`))).toBe(true);
+  });
+
+  it("an upload that failed before 'complete' (no URLs yet) still removes its preview and thumbnail", () => {
+    expect(storageTargetsForPhoto(photo({ watermark_url: null, thumbnail_url: null }))).toEqual([
+      { bucket: "originals", key: `${MATCH}/${PHOTO}`, photoId: PHOTO },
+      { bucket: "media", key: `${MATCH}/${PHOTO}-preview.jpg`, photoId: PHOTO },
+      { bucket: "media", key: `${MATCH}/${PHOTO}-thumb.jpg`, photoId: PHOTO },
+    ]);
   });
 });
 

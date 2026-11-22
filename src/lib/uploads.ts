@@ -16,5 +16,5 @@ export type UploadVariant = "original" | "preview" | "thumb";
 
 // Where the browser sends each file: straight to R2 (presigned, no credentials in the browser) or,
 // when direct uploads are not configured, to this app's Worker route.
-export type UploadTarget = { url: string; direct: boolean; contentType: string };
+export type UploadTarget = { url: string; direct: boolean; contentType: string; headers: Record<string, string> };
 

@@ -12,7 +12,7 @@ if (!envFile) throw new Error("E2E_ENV_FILE is required (output of `supabase sta
 const localEnv = Object.fromEntries(
   readFileSync(envFile, "utf8")
     .split(/\r?\n/)
-    .map((line) => line.match(/^([A-Z_]+)="?(.*?)"?$/))
+    .map((line) => line.match(/^([A-Z0-9_]+)="?(.*?)"?$/))
     .filter((match): match is RegExpMatchArray => Boolean(match))
     .map((match) => [match[1], match[2]]),
 );

@@ -1,5 +1,6 @@
 // Pure logic for photo/album deletion (no I/O), shared by the server, the admin UI and the tests.
 import { mediaKeyFromUrl } from "./protected-images";
+import { uploadKeys } from "./uploads";
 
 export type DeletionOutcome = "eligible" | "download_active" | "pending_payment" | "already_deleted";
 
@@ -46,11 +47,16 @@ export function isSafeAlbumPath(key: string, matchId: string) {
 }
 
 // Keys are generated server-side from the photo id, so files are never shared between photos.
+// The preview/thumbnail keys are ALSO derived from the ids: an upload that failed before "complete"
+// has no URLs stored yet, but its preview/thumbnail may already be in R2 and must be removed too.
 export function storageTargetsForPhoto(photo: PreparedPhoto): StorageTarget[] {
+  const derived = uploadKeys(photo.match_id, photo.photo_id);
   const candidates: Array<[StorageTarget["bucket"], string | null]> = [
     ["originals", photo.original_key],
     ["media", mediaKeyFromUrl(photo.watermark_url)],
     ["media", mediaKeyFromUrl(photo.thumbnail_url)],
+    ["media", derived.preview],
+    ["media", derived.thumb],
   ];
   const targets: StorageTarget[] = [];
   for (const [bucket, key] of candidates) {

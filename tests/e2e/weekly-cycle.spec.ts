@@ -352,6 +352,20 @@ test("8c. simultaneous uploads complete, without duplicates and within the budge
   const again = await request.put(`/api/admin/uploads/${one!.id}/original`, { headers: { ...auth, "Content-Type": "image/jpeg" }, data: Buffer.alloc(10) });
   expect(again.status()).toBe(409);
 
+  // An upload aborted after its preview was sent (no URLs stored yet) leaves no file behind.
+  const aborted = await (
+    await request.post("/api/admin/uploads", {
+      headers: auth,
+      data: { albumId: album2, title: "aborted.jpg", contentType: "image/jpeg", originalBytes: 1000, previewBytes: 500, thumbBytes: 200 },
+    })
+  ).json();
+  for (const [variant, size] of [["original", 1000], ["preview", 500]] as const) {
+    expect((await request.put(aborted.uploads[variant].url, { headers: { ...auth, "Content-Type": "image/jpeg" }, data: Buffer.alloc(size, 7) })).status()).toBe(200);
+  }
+  expect((await request.get(`/media/${album2}/${aborted.photoId}-preview.jpg`)).status()).toBe(200);
+  expect((await request.post(`/api/admin/uploads/${aborted.photoId}/abort`, { headers: auth, data: {} })).status()).toBe(200);
+  expect((await request.get(`/media/${album2}/${aborted.photoId}-preview.jpg?after=abort`)).status()).toBe(404);
+
   // Clean up: delete the album so later tests keep their baseline.
   const ids = (await supabase.from("photos").select("id").eq("match_id", album2)).data!.map((r) => r.id);
   const del = await request.post("/api/admin/deletions/execute", { headers: auth, data: { photoIds: ids, confirm: "ELIMINAR" } });

@@ -161,11 +161,32 @@ export async function cleanupStaleUploads(supabase: SupabaseClient, buckets: Pho
     .order("created_at", { ascending: true })
     .limit(limit);
   if (error) throw new Error(`stale uploads lookup: ${error.message}`);
-  const ids = (data ?? []).map((row) => row.id as string);
-  if (!ids.length) return { cleaned: 0, failed: 0, freedBytes: 0, more: false };
+  const candidates = (data ?? []).map((row) => row.id as string);
+  if (!candidates.length) return { cleaned: 0, failed: 0, freedBytes: 0, more: false };
 
+  // Claim the stale uploads atomically (uploading → pending_deletion, unpublished). This UPDATE and
+  // the upload's "complete" UPDATE are both conditional on status = 'uploading': only one wins, so
+  // a photo completed in the meantime is never deleted.
+  const { data: claimed, error: claimError } = await supabase
+    .from("photos")
+    .update({ status: "pending_deletion", is_published: false })
+    .in("id", candidates)
+    .eq("status", "uploading")
+    .lt("created_at", cutoff)
+    .select("id");
+  if (claimError) throw new Error(`stale uploads claim: ${claimError.message}`);
+  const { data: pending, error: pendingError } = await supabase
+    .from("photos")
+    .select("id")
+    .in("id", candidates)
+    .eq("status", "pending_deletion");
+  if (pendingError) throw new Error(`stale uploads recheck: ${pendingError.message}`);
+  const ids = Array.from(new Set([...(claimed ?? []), ...(pending ?? [])].map((row) => row.id as string)));
+  if (!ids.length) return { cleaned: 0, failed: 0, freedBytes: 0, more: candidates.length === limit };
+
+  // Only photos now 'pending_deletion' go on: executeDeletionBatch re-validates purchases (locked).
   const result = await executeDeletionBatch(supabase, buckets, ids);
-  return { cleaned: result.deleted, failed: result.failed, freedBytes: result.freedBytes, more: ids.length === limit };
+  return { cleaned: result.deleted, failed: result.failed, freedBytes: result.freedBytes, more: candidates.length === limit };
 }
 
 const MAX_STALE_PER_CALL = 50;

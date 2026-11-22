@@ -7,7 +7,7 @@ const EXPECTED_URL = "https://sigjpwmbcefapjaopuxr.supabase.co";
 function readEnv() {
   const env: Record<string, string> = {};
   for (const line of readFileSync(".env.production.local", "utf8").split(/\r?\n/)) {
-    const match = line.match(/^\s*([A-Z_]+)\s*=\s*["']?(.*?)["']?\s*$/);
+    const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*["']?(.*?)["']?\s*$/);
     if (match) env[match[1]] = match[2];
   }
   return env;

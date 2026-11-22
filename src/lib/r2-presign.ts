@@ -34,6 +34,7 @@ export type PresignInput = {
   service?: string; // "s3"
   expiresSeconds: number;
   signedHeaders?: Record<string, string>; // lowercase names, e.g. content-length, content-type
+  query?: Record<string, string>; // extra signed query parameters (e.g. list-type=2)
   now?: Date;
 };
 
@@ -51,6 +52,7 @@ export async function presignUrl(input: PresignInput): Promise<string> {
   const signedHeaders = headerNames.join(";");
 
   const query: Record<string, string> = {
+    ...(input.query ?? {}),
     "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
     "X-Amz-Credential": `${input.accessKeyId}/${scope}`,
     "X-Amz-Date": amzDate,
@@ -90,6 +92,11 @@ export function getR2DirectConfig(): R2DirectConfig | null {
 
 export const DIRECT_UPLOAD_TTL_SECONDS = 15 * 60;
 
+// Headers the browser must send with a presigned PUT (they are part of the signature).
+// If-None-Match: * → R2 only writes if the key does not exist yet: a presigned URL can never
+// overwrite a stored file (not even its own after a successful upload); a retry gets 412.
+export const directUploadHeaders = (contentType: string) => ({ "Content-Type": contentType, "If-None-Match": "*" });
+
 export async function presignR2Put(
   config: R2DirectConfig,
   bucket: string,
@@ -105,6 +112,6 @@ export async function presignR2Put(
     accessKeyId: config.accessKeyId,
     secretAccessKey: config.secretAccessKey,
     expiresSeconds,
-    signedHeaders: { "content-length": String(contentLength), "content-type": contentType },
+    signedHeaders: { "content-length": String(contentLength), "content-type": contentType, "if-none-match": "*" },
   });
 }

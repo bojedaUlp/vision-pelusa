@@ -4,7 +4,7 @@
       "allowed": {
         "origins": ["https://visionpelusa.com"],
         "methods": ["PUT"],
-        "headers": ["content-type"]
+        "headers": ["content-type", "if-none-match"]
       },
       "maxAgeSeconds": 3600
     }

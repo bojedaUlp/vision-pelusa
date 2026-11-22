@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { adminErrorResponse, AdminRequestError, requireAdmin } from "@/lib/admin-server";
 import { isUuid } from "@/lib/photo-deletion-core";
 import { getStorageBudgetBytes, MAX_ORIGINAL_BYTES, MAX_PREVIEW_BYTES, MAX_THUMB_BYTES } from "@/lib/r2";
-import { getR2DirectConfig, presignR2Put } from "@/lib/r2-presign";
+import { directUploadHeaders, getR2DirectConfig, presignR2Put } from "@/lib/r2-presign";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { MEDIA_BUCKET_NAME, ORIGINALS_BUCKET_NAME, uploadKeys, type UploadTarget, type UploadVariant } from "@/lib/uploads";
 
@@ -66,8 +66,13 @@ export async function POST(request: Request) {
     for (const variant of Object.keys(files) as UploadVariant[]) {
       const file = files[variant];
       uploads[variant] = direct
-        ? { url: await presignR2Put(direct, file.bucket, file.key, file.contentType, file.bytes), direct: true, contentType: file.contentType }
-        : { url: `/api/admin/uploads/${photoId}/${variant}`, direct: false, contentType: file.contentType };
+        ? {
+            url: await presignR2Put(direct, file.bucket, file.key, file.contentType, file.bytes),
+            direct: true,
+            contentType: file.contentType,
+            headers: directUploadHeaders(file.contentType),
+          }
+        : { url: `/api/admin/uploads/${photoId}/${variant}`, direct: false, contentType: file.contentType, headers: { "Content-Type": file.contentType } };
     }
     return NextResponse.json({ ok: true, photoId, uploads });
   } catch (error) {
