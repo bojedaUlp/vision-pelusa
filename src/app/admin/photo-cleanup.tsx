@@ -494,6 +494,25 @@ const levelStyle: Record<StorageUsage["level"], { bar: string; text: string; mes
 export function StorageIndicator({ reloadKey }: { reloadKey: number }) {
   const [usage, setUsage] = useState<StorageUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refresh, setRefresh] = useState(0);
+  const [releasing, setReleasing] = useState<string | null>(null);
+
+  // Frees the space of failed/abandoned uploads (older than 30 min) and finishes interrupted deletions.
+  const release = async () => {
+    setReleasing("Liberando...");
+    try {
+      let cleaned = 0;
+      for (let round = 0; round < 20; round += 1) {
+        const result = await adminApi<{ cleaned: number; more: boolean }>("/api/admin/uploads/cleanup", {});
+        cleaned += result.cleaned;
+        if (!result.more) break;
+      }
+      setReleasing(cleaned ? `Se liberaron ${cleaned} carga(s) incompleta(s).` : "No hay cargas incompletas de más de 30 minutos.");
+    } catch (releaseError) {
+      setReleasing(releaseError instanceof Error ? releaseError.message : "No se pudo liberar.");
+    }
+    setRefresh((value) => value + 1);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -510,7 +529,7 @@ export function StorageIndicator({ reloadKey }: { reloadKey: number }) {
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [reloadKey, refresh]);
 
   if (error) {
     return <p className="mb-8 text-[12px] text-[#fca5a5]">Almacenamiento: no se pudo consultar ({error}).</p>;
@@ -534,7 +553,18 @@ export function StorageIndicator({ reloadKey }: { reloadKey: number }) {
       <p className="mt-2 text-[11.5px] text-[#8A9A93]">
         {usage.photos} fotos · {usage.albums} álbumes
         {usage.incompleteUploads ? ` · ${usage.incompleteUploads} carga(s) incompleta(s) ocupando espacio` : ""}
+        {usage.incompleteUploads ? (
+          <button
+            type="button"
+            disabled={releasing === "Liberando..."}
+            onClick={() => void release()}
+            className="ml-3 text-[#FFC94A] underline disabled:opacity-60"
+          >
+            Liberar ahora
+          </button>
+        ) : null}
       </p>
+      {releasing ? <p className="mt-1 text-[11.5px] text-[#8A9A93]">{releasing}</p> : null}
       {style.message ? <p className={`mt-2 text-[12px] ${style.text}`}>{style.message}</p> : null}
     </div>
   );

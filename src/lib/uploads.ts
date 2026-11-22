@@ -7,3 +7,14 @@ export const uploadKeys = (matchId: string, photoId: string) => ({
 });
 
 export const heroKey = (matchId: string, timestamp: number) => `${matchId}/hero-${timestamp}.jpg`;
+
+// Must match the bucket_name of the bindings in wrangler.jsonc (used for direct, presigned uploads).
+export const ORIGINALS_BUCKET_NAME = "vision-pelusa-originals";
+export const MEDIA_BUCKET_NAME = "vision-pelusa-media";
+
+export type UploadVariant = "original" | "preview" | "thumb";
+
+// Where the browser sends each file: straight to R2 (presigned, no credentials in the browser) or,
+// when direct uploads are not configured, to this app's Worker route.
+export type UploadTarget = { url: string; direct: boolean; contentType: string };
+

@@ -146,6 +146,30 @@ export async function executeDeletionBatch(supabase: SupabaseClient, buckets: Ph
   };
 }
 
+// Uploads that never completed keep their reserved space ('uploading'), and deletions interrupted
+// half-way stay 'pending_deletion'. Neither can be purchased (purchase_items_guard), so finishing
+// them is always safe: their R2 objects are removed (missing keys are fine) and the reservation is
+// released. Uploads younger than STALE_UPLOAD_MINUTES may still be in progress and are left alone.
+export const STALE_UPLOAD_MINUTES = 30;
+
+export async function cleanupStaleUploads(supabase: SupabaseClient, buckets: PhotoBuckets, limit = MAX_STALE_PER_CALL) {
+  const cutoff = new Date(Date.now() - STALE_UPLOAD_MINUTES * 60_000).toISOString();
+  const { data, error } = await supabase
+    .from("photos")
+    .select("id")
+    .or(`status.eq.pending_deletion,and(status.eq.uploading,created_at.lt.${cutoff})`)
+    .order("created_at", { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(`stale uploads lookup: ${error.message}`);
+  const ids = (data ?? []).map((row) => row.id as string);
+  if (!ids.length) return { cleaned: 0, failed: 0, freedBytes: 0, more: false };
+
+  const result = await executeDeletionBatch(supabase, buckets, ids);
+  return { cleaned: result.deleted, failed: result.failed, freedBytes: result.freedBytes, more: ids.length === limit };
+}
+
+const MAX_STALE_PER_CALL = 50;
+
 // Closes an album deletion after its batches ran: no photos left → the album is marked deleted
 // (row kept) and its hero removed; protected photos left → it is archived (hidden, no sales).
 export async function finalizeAlbumDeletion(supabase: SupabaseClient, buckets: PhotoBuckets, matchId: string) {

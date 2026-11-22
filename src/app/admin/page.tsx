@@ -19,38 +19,78 @@ const MAX_UPLOAD_BATCH = 100;
 
 class StorageFullError extends Error {}
 
-// One photo → R2 through the admin API: the watermarked PREVIEW + THUMBNAIL are generated here
-// (watermark baked into the pixels), the space is reserved server-side before sending anything,
-// and the photo is only published after the server verified the three files. Any failure
-// releases the reservation and removes what was already sent.
+type UploadTarget = { url: string; direct: boolean; contentType: string };
+
+// Sends one file to where the server said: straight to R2 with a presigned URL (no credentials in
+// the browser, the bytes never pass through the Worker) or, if direct uploads are not configured,
+// through the Worker route. Transient failures (network, 5xx) are retried with backoff.
+async function sendFile(target: UploadTarget, body: Blob) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      if (!target.direct) {
+        await adminUpload(target.url, body, target.contentType);
+        return;
+      }
+      const response = await fetch(target.url, { method: "PUT", headers: { "Content-Type": target.contentType }, body });
+      if (response.ok) return;
+      const error = new Error(`El almacenamiento rechazó el archivo (HTTP ${response.status}).`);
+      if (response.status < 500 || attempt >= 3) throw error; // 4xx (e.g. expired URL) is not retried
+    } catch (error) {
+      const transient = error instanceof TypeError || (error instanceof Error && /HTTP 5\d\d|Error 5\d\d/.test(error.message));
+      if (!transient || attempt >= 3) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+  }
+}
+
+// One photo → R2: the watermarked PREVIEW + THUMBNAIL are generated here (watermark baked into the
+// pixels), the space is reserved server-side before sending anything, and the photo is only
+// published after the server verified the three files. Any failure releases the reservation and
+// removes what was already sent.
 async function uploadPhoto(file: File, albumId: string, sortOrder: number, price: number) {
   const { preview, thumbnail } = await createProtectedVariants(file);
   let photoId: string;
+  let uploads: Record<"original" | "preview" | "thumb", UploadTarget>;
   try {
-    ({ photoId } = await adminApi<{ photoId: string }>("/api/admin/uploads", {
-      albumId,
-      title: file.name,
-      sortOrder,
-      price,
-      originalBytes: file.size,
-      previewBytes: preview.size,
-      thumbBytes: thumbnail.size,
-    }));
+    ({ photoId, uploads } = await adminApi<{ photoId: string; uploads: Record<"original" | "preview" | "thumb", UploadTarget> }>(
+      "/api/admin/uploads",
+      {
+        albumId,
+        title: file.name,
+        sortOrder,
+        price,
+        contentType: file.type || "image/jpeg",
+        originalBytes: file.size,
+        previewBytes: preview.size,
+        thumbBytes: thumbnail.size,
+      },
+    ));
   } catch (error) {
     if (error instanceof Error && error.message.includes("límite de almacenamiento")) throw new StorageFullError(error.message);
     throw error;
   }
 
   try {
-    await adminUpload(`/api/admin/uploads/${photoId}/original`, file, file.type || "image/jpeg");
-    await adminUpload(`/api/admin/uploads/${photoId}/preview`, preview, "image/jpeg");
-    await adminUpload(`/api/admin/uploads/${photoId}/thumb`, thumbnail, "image/jpeg");
+    await sendFile(uploads.original, file);
+    await sendFile(uploads.preview, preview);
+    await sendFile(uploads.thumb, thumbnail);
     const done = await adminApi<{ thumbnailUrl: string }>(`/api/admin/uploads/${photoId}/complete`, {});
     return done.thumbnailUrl;
   } catch (error) {
     await adminApi(`/api/admin/uploads/${photoId}/abort`, {}).catch(() => undefined);
     throw error;
   }
+}
+
+// Finishes stale uploads / interrupted deletions (server-side, ≤ 50 per call).
+async function releaseIncompleteUploads() {
+  let cleaned = 0;
+  for (let round = 0; round < 20; round += 1) {
+    const result = await adminApi<{ cleaned: number; more: boolean }>("/api/admin/uploads/cleanup", {});
+    cleaned += result.cleaned;
+    if (!result.more) break;
+  }
+  return cleaned;
 }
 
 // No default gallery: the form starts empty so nothing can be created or targeted implicitly.
@@ -377,6 +417,10 @@ export default function AdminPage() {
     const filesToUpload = selectedFiles.slice(0, MAX_UPLOAD_BATCH);
     const price = parsePriceValue(form.price);
     setIsUploading(true);
+
+    // First release the space of earlier failed/abandoned uploads, so it does not stay blocked.
+    setStatusMessage("Liberando cargas incompletas anteriores...");
+    await releaseIncompleteUploads().catch(() => undefined);
 
     const nextUploads: UploadItem[] = [];
     const failedFiles: string[] = [];

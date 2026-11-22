@@ -277,6 +277,89 @@ test("8. after the download window and the payment expire, the album is fully de
   expect(await activePhotos(request)).toBe(baselinePhotos);
 });
 
+// --- Regression for the production 503 (2026-11-22): delete → new album → upload again ----------
+const slug2 = `${slug}-b`;
+let album2 = "";
+
+test("8b. after deleting an album: stale reservations are released and a new album uploads fine", async ({ request }) => {
+  // A reservation left by a failed upload 2 h ago (it must not block space forever).
+  const { data: stale } = await supabase
+    .from("photos")
+    .insert({
+      match_id: albumId, title: "stale.jpg", status: "uploading", is_published: false, original_key: `${albumId}/stale`,
+      original_bytes: 5_000_000, preview_bytes: 1000, thumb_bytes: 500, created_at: new Date(Date.now() - 2 * 3600_000).toISOString(),
+    })
+    .select("id")
+    .single();
+  await admin.reload();
+  await expect(admin.getByTestId("storage-indicator")).toContainText("1 carga(s) incompleta(s)");
+
+  await admin.getByRole("button", { name: "+ Nuevo partido" }).click();
+  await admin.getByLabel("Título del partido").fill(`E2E Fecha B ${runId}`);
+  await admin.getByLabel("Slug").fill(slug2);
+  await admin.getByRole("button", { name: "Crear galería" }).click();
+  await expect(admin.getByText(/Galería .* creada/)).toBeVisible();
+
+  // One transient 503 on an original upload: the client retries, without duplicating the photo.
+  let failed = 0;
+  await admin.route("**/api/admin/uploads/*/original", async (route) => {
+    if (failed++ === 0) return route.fulfill({ status: 503, contentType: "text/html", body: "Error 1102: Worker exceeded resource limits" });
+    return route.continue();
+  });
+  await admin.locator('input[type="file"]').setInputFiles(await makeJpegs(admin));
+  await admin.getByRole("button", { name: "Subir fotos" }).click();
+  await expect(admin.getByText("Se cargaron 3 imágenes correctamente.")).toBeVisible({ timeout: 120_000 });
+  await admin.unroute("**/api/admin/uploads/*/original");
+  expect(failed).toBeGreaterThan(3); // the 503 happened and every file still went through
+
+  const { data: album } = await supabase.from("matches").select("id").eq("slug", slug2).single();
+  album2 = album!.id;
+  const { data: rows } = await supabase.from("photos").select("title, status").eq("match_id", album2);
+  expect(rows!.map((r) => `${r.title}:${r.status}`).sort()).toEqual(files.map((f) => `${f}:active`).sort());
+
+  const { data: staleRow } = await supabase.from("photos").select("status, original_bytes").eq("id", stale!.id).single();
+  expect(staleRow).toEqual({ status: "deleted", original_bytes: 0 });
+  await expect(admin.getByTestId("storage-indicator")).not.toContainText("carga(s) incompleta(s)");
+  expect(await activePhotos(request)).toBe(baselinePhotos + 3);
+});
+
+test("8c. simultaneous uploads complete, without duplicates and within the budget", async ({ request }) => {
+  const token = await tokenFor(env("E2E_ADMIN_EMAIL"), env("E2E_ADMIN_PASSWORD"));
+  const auth = { Authorization: `Bearer ${token}` };
+  const uploadOne = async (n: number) => {
+    const sizes = { original: 2_000_000 + n, preview: 50_000 + n, thumb: 8_000 + n };
+    const reserve = await request.post("/api/admin/uploads", {
+      headers: auth,
+      data: { albumId: album2, title: `parallel-${n}.jpg`, contentType: "image/jpeg", originalBytes: sizes.original, previewBytes: sizes.preview, thumbBytes: sizes.thumb },
+    });
+    const { photoId, uploads } = await reserve.json();
+    for (const variant of ["original", "preview", "thumb"] as const) {
+      expect(uploads[variant].direct).toBe(false); // local stack: no R2 S3 credentials → Worker route
+      const put = await request.put(uploads[variant].url, {
+        headers: { ...auth, "Content-Type": "image/jpeg" },
+        data: Buffer.alloc(sizes[variant], n),
+      });
+      expect(put.status()).toBe(200);
+    }
+    return (await request.post(`/api/admin/uploads/${photoId}/complete`, { headers: auth, data: {} })).status();
+  };
+  expect(await Promise.all([1, 2, 3, 4].map(uploadOne))).toEqual([200, 200, 200, 200]);
+  const { count } = await supabase.from("photos").select("id", { count: "exact", head: true }).eq("match_id", album2).eq("status", "active");
+  expect(count).toBe(7);
+
+  // Same reservation cannot receive a second (duplicate) file once published.
+  const { data: one } = await supabase.from("photos").select("id").eq("match_id", album2).eq("title", "parallel-1.jpg").single();
+  const again = await request.put(`/api/admin/uploads/${one!.id}/original`, { headers: { ...auth, "Content-Type": "image/jpeg" }, data: Buffer.alloc(10) });
+  expect(again.status()).toBe(409);
+
+  // Clean up: delete the album so later tests keep their baseline.
+  const ids = (await supabase.from("photos").select("id").eq("match_id", album2)).data!.map((r) => r.id);
+  const del = await request.post("/api/admin/deletions/execute", { headers: auth, data: { photoIds: ids, confirm: "ELIMINAR" } });
+  expect((await del.json()).deleted).toBe(7);
+  expect((await request.post(`/api/admin/albums/${album2}`, { headers: auth, data: { action: "finalize-delete" } })).status()).toBe(200);
+  expect(await activePhotos(request)).toBe(baselinePhotos);
+});
+
 test("9. admin endpoints refuse anonymous and non-admin users; storage budget enforced", async ({ request }) => {
   expect((await request.get("/api/admin/storage")).status()).toBe(401);
   const userToken = await tokenFor(env("E2E_USER_EMAIL"), env("E2E_USER_PASSWORD"));

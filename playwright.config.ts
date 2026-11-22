@@ -22,7 +22,7 @@ if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(supabaseUrl)) {
   throw new Error(`Refusing to run E2E against a non-local Supabase: ${supabaseUrl}`);
 }
 
-const PORT = 3100;
+const PORT = Number(process.env.E2E_PORT ?? 3100); // override if 3100 is taken by another local project
 const MP_PORT = 4010;
 export const e2e = {
   appUrl: `http://localhost:${PORT}`,
