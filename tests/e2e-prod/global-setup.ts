@@ -36,8 +36,15 @@ export default async function globalSetup() {
 
   return async () => {
     // Remove the throwaway album rows (no purchases reference them) and the temporary admin.
-    const { data: album } = await service.from("matches").select("id").eq("slug", slug).maybeSingle();
-    if (album) {
+    // Every throwaway album of this run (slug and slug-*), only if no purchase references it.
+    const { data: albums } = await service.from("matches").select("id").like("slug", `${slug}%`);
+    for (const album of albums ?? []) {
+      const { data: photoRows } = await service.from("photos").select("id").eq("match_id", album.id);
+      const ids = (photoRows ?? []).map((row) => row.id);
+      const { count } = ids.length
+        ? await service.from("purchase_items").select("id", { count: "exact", head: true }).in("photo_id", ids)
+        : { count: 0 };
+      if (count) continue;
       await service.from("photos").delete().eq("match_id", album.id);
       await service.from("matches").delete().eq("id", album.id);
     }
